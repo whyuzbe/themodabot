@@ -8,8 +8,8 @@ from config import BOT_TOKEN, REDIS_URL, DATABASE_URL, DB_DRIVER
 from db.pool import DB
 from db.repos import Repos
 
-# Импортируем модуль handlers
-import handlers
+# Импортируем главный роутер из пакета handlers
+from handlers import router as main_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,11 +60,8 @@ async def main():
     dp["repos"] = repos
     dp["redis"] = redis
 
-    # Подключаем роутеры из модуля handlers, если в __init__.py есть функция setup/router или список
-    if hasattr(handlers, "router"):
-        dp.include_router(handlers.router)
-    elif hasattr(handlers, "setup_routers"):
-        handlers.setup_routers(dp)
+    # Подключаем роутеры
+    dp.include_router(main_router)
 
     # Запускаем фоновую очистку просроченных броней
     checker_task = asyncio.create_task(cart_expiration_checker(bot, repos))
