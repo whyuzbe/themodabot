@@ -34,10 +34,25 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
     if not banner_file_id:
         banner_file_id = await repos.settings.get("banner_file_id")
 
-    # Передаем противоположный пол для отображения кнопки смены каталога (show_other=True)
     show_other = override_gender is not None and override_gender != user.get("gender", "male")
     urls = await _category_urls(repos, gender)
+    
+    # Получаем клавиатуру и принудительно заменяем тексты на кнопках прямо здесь (гарантия от старого кэша)
     kb = await kb_categories(repos, lang, gender, urls, show_other=show_other)
+    
+    icon_map = {
+        "clothing": "👕 Одежда",
+        "shoes": "👟 Обувь",
+        "accessories": "💍 Аксессуары",
+        "bags": "👜 Сумки"
+    }
+    
+    for row in kb.inline_keyboard:
+        for btn in row:
+            for key, val in icon_map.items():
+                if key in btn.callback_data:
+                    btn.text = val
+
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
     try:
@@ -147,7 +162,6 @@ async def cb_go_main(call: CallbackQuery, state: FSMContext, repos: Repos):
     await call.answer()
 
 
-# Хендлер для переключения между мужским и женским каталогами
 @router.callback_query(F.data.startswith("cat_back:"))
 async def cb_cat_back(call: CallbackQuery, repos: Repos):
     target_gender = call.data.split(":")[1]
