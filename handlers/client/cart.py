@@ -1,3 +1,4 @@
+import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -23,7 +24,54 @@ class CartStates(StatesGroup):
     fixing_comment = State()
 
 
-# ── Deep-link обработка: вызывается из start.py при /start cart_<id> / wish_<id> ──
+# ── Вспомогательные функции карточки и калькуляции ──
+
+def _cart_lines(items: list[dict]) -> str:
+    return "\n".join(
+        f"• <b>{it.get('title','Товар')}</b> — {it.get('price','—')}"
+        for it in items
+    )
+
+
+def _get_cart_timer_info(items: list[dict]) -> str:
+    if not items:
+        return ""
+    # Находим самую раннюю дату добавления
+    earliest = min(it["added_at"] for it in items if "added_at" in it and it["added_at"])
+    if not earliest:
+        return ""
+    if isinstance(earliest, str):
+        try:
+            earliest = datetime.datetime.fromisoformat(earliest)
+        except Exception:
+            return ""
+
+    elapsed = (datetime.datetime.now(datetime.timezone.utc) - earliest.replace(tzinfo=datetime.timezone.utc)).total_seconds() / 60
+    remaining = max(0, int(45 - elapsed))
+    return f"\n⏳ <i>Бронь на товары в корзине действительна: <b>~{remaining} мин</b></i>\n"
+
+
+def _estimate_shipping_time(location_text: str) -> str:
+    loc = location_text.lower()
+    # Расчет ориентировочных сроков доставки из Китая
+    if any(k in loc for k in ["ташкент", "узбекистан", "uzb", "uzbekistan"]):
+        return "🚀 Примерный срок доставки из Китая: 7–12 дней"
+    elif any(k in loc for k in ["москва", "спб", "питер", "россия", "rf", "ru", "russia"]):
+        return "🚀 Примерный срок доставки из Китая: 10–18 дней"
+    elif any(k in loc for k in ["казахстан", "алматы", "астана", "kz"]):
+        return "🚀 Примерный срок доставки из Китая: 8–14 дней"
+    else:
+        return "🚀 Примерный срок доставки из Китая: 10–20 дней"
+
+
+def kb_reuse_or_manual(reuse_label: str, reuse_cb: str, manual_cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✅ {reuse_label}", callback_data=reuse_cb)],
+        [InlineKeyboardButton(text="✏️ Указать другой", callback_data=manual_cb)],
+    ])
+
+
+# ── Deep-link обработка ──
 
 async def handle_deeplink(message: Message, payload: str, repos: Repos, user_tg_id: int | None = None):
     user_tg_id = user_tg_id or message.from_user.id
@@ -68,7 +116,6 @@ async def handle_deeplink(message: Message, payload: str, repos: Repos, user_tg_
         msg = t(lang, "added_to_wish") if added else t(lang, "already_in_wish")
     elif action == "interest":
         if post.get("in_stock", True):
-            # товар уже снова в наличии — просто добавим в корзину вместо ожидания
             added = await repos.cart.add(user_tg_id, post_id)
             template = await tr(repos, "✅ Товар «PRODUCTNAME» уже в наличии!", lang)
             msg = template.replace("PRODUCTNAME", post["title"]) + "\n" + (t(lang, "added_to_cart") if added else t(lang, "already_in_cart"))
@@ -86,13 +133,6 @@ async def handle_deeplink(message: Message, payload: str, repos: Repos, user_tg_
 
 # ── Корзина ────────────────────────────────────────────────────────
 
-def _cart_lines(items: list[dict]) -> str:
-    return "\n".join(
-        f"{i}. <b>{it.get('title','Товар')}</b> — {it.get('price','—')}"
-        for i, it in enumerate(items, 1)
-    )
-
-
 @router.message(ButtonText("btn_cart"))
 async def msg_cart(message: Message, repos: Repos):
     user = await repos.users.get(message.from_user.id)
@@ -106,7 +146,9 @@ async def msg_cart(message: Message, repos: Repos):
         return
 
     cart_title = await tt(repos, lang, "cart_title")
-    await message.answer(cart_title + _cart_lines(items), reply_markup=await kb_cart(repos, lang, items))
+    timer_info = _get_cart_timer_info(items)
+    text = f"{cart_title}\n{_cart_lines(items)}\n{timer_info}"
+    await message.answer(text, reply_markup=await kb_cart(repos, lang, items))
 
 
 @router.callback_query(F.data == "go:cart")
@@ -121,7 +163,9 @@ async def cb_go_cart(call: CallbackQuery, repos: Repos):
         return
 
     cart_title = await tt(repos, lang, "cart_title")
-    await call.message.edit_text(cart_title + _cart_lines(items), reply_markup=await kb_cart(repos, lang, items))
+    timer_info = _get_cart_timer_info(items)
+    text = f"{cart_title}\n{_cart_lines(items)}\n{timer_info}"
+    await call.message.edit_text(text, reply_markup=await kb_cart(repos, lang, items))
     await call.answer()
 
 
@@ -138,7 +182,9 @@ async def cb_cart_remove(call: CallbackQuery, repos: Repos):
         await call.answer("🗑")
         return
     cart_title = await tt(repos, lang, "cart_title")
-    await call.message.edit_text(cart_title + _cart_lines(items), reply_markup=await kb_cart(repos, lang, items))
+    timer_info = _get_cart_timer_info(items)
+    text = f"{cart_title}\n{_cart_lines(items)}\n{timer_info}"
+    await call.message.edit_text(text, reply_markup=await kb_cart(repos, lang, items))
     await call.answer("🗑")
 
 
@@ -151,14 +197,7 @@ async def cb_cart_clear(call: CallbackQuery, repos: Repos):
     await call.answer()
 
 
-# ── Оформление заказа ───────────────────────────────────────────────
-
-def kb_reuse_or_manual(reuse_label: str, reuse_cb: str, manual_cb: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"✅ {reuse_label}", callback_data=reuse_cb)],
-        [InlineKeyboardButton(text="✏️ Указать другой", callback_data=manual_cb)],
-    ])
-
+# ── Умный Checkout / Оформление заказа ─────────────────────────────────────
 
 @router.callback_query(F.data == "cart:checkout")
 async def cb_checkout(call: CallbackQuery, state: FSMContext, repos: Repos):
@@ -170,8 +209,6 @@ async def cb_checkout(call: CallbackQuery, state: FSMContext, repos: Repos):
         await call.answer(await tr(repos, "Корзина пуста!", lang), show_alert=True)
         return
 
-    # Перепроверяем наличие прямо перед оформлением: товар мог быть отмечен
-    # складом как «закончился» уже ПОСЛЕ того, как клиент положил его в корзину.
     available = [it for it in items if it.get("in_stock", True)]
     unavailable = [it for it in items if not it.get("in_stock", True)]
 
@@ -212,10 +249,8 @@ async def msg_checkout_phone(message: Message, state: FSMContext, repos: Repos):
     phone = message.contact.phone_number
     await repos.users.update(message.from_user.id, phone=phone)
 
-    user = await repos.users.get(message.from_user.id)
     data = await state.get_data()
     lang = data.get("lang", "ru")
-
     items = data.get("cart_items", [])
 
     await message.answer(
@@ -225,16 +260,8 @@ async def msg_checkout_phone(message: Message, state: FSMContext, repos: Repos):
     await _proceed_to_size(message, state, repos, items, lang, edit=False)
 
 
-@router.message(CartStates.waiting_phone)
-async def msg_checkout_phone_invalid(message: Message, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get("lang", "ru")
-    await message.answer(t(lang, "invalid_phone"))
-
-
 async def _proceed_to_size(target, state: FSMContext, repos: Repos, items: list[dict], lang: str, edit: bool):
-    """target — Message; используем target.chat.id как tg_id (совпадает в приватном чате с ботом)."""
-    user_tg_id = target.chat.id
+    user_tg_id = target.chat.id if hasattr(target, 'chat') else target.from_user.id
     category = items[0].get("category") if items else None
     await state.update_data(checkout_category=category)
 
@@ -242,7 +269,7 @@ async def _proceed_to_size(target, state: FSMContext, repos: Repos, items: list[
 
     if saved_size:
         text = (
-            _cart_lines(items) + f"\n\n📏 У вас сохранён размер для этой категории: <b>{saved_size}</b>\n"
+            f"📏 У вас сохранён размер для этой категории: <b>{saved_size}</b>\n"
             "Использовать его или указать другой?"
         )
         kb = kb_reuse_or_manual(f"Использовать {saved_size}", "checkout:size:saved", "checkout:size:manual")
@@ -252,7 +279,7 @@ async def _proceed_to_size(target, state: FSMContext, repos: Repos, items: list[
             await target.answer(text, reply_markup=kb)
     else:
         await state.set_state(CartStates.waiting_size)
-        text = _cart_lines(items) + "\n\n" + t(lang, "ask_size")
+        text = t(lang, "ask_size")
         if edit:
             await target.edit_text(text)
         else:
@@ -285,13 +312,10 @@ async def msg_size(message: Message, state: FSMContext, repos: Repos):
 
 
 async def _ask_comment_step(target, state: FSMContext, repos: Repos, user_tg_id: int, edit: bool):
-    """Показывает либо вариант 'использовать прошлый адрес', либо просит ввести новый."""
-    data = await state.get_data()
-    lang = data.get("lang", "ru")
     last_address = await repos.users.get_last_address(user_tg_id)
 
     if last_address:
-        text = f"💬 Ваш сохранённый адрес/комментарий:\n<i>{last_address}</i>\n\nИспользовать его или указать другой?"
+        text = f"💬 Ваш сохранённый адрес/город:\n<i>{last_address}</i>\n\nИспользовать его или указать другой?"
         kb = kb_reuse_or_manual("Использовать этот", "checkout:comment:saved", "checkout:comment:manual")
         if edit:
             await target.edit_text(text, reply_markup=kb)
@@ -299,6 +323,8 @@ async def _ask_comment_step(target, state: FSMContext, repos: Repos, user_tg_id:
             await target.answer(text, reply_markup=kb)
     else:
         await state.set_state(CartStates.waiting_comment)
+        data = await state.get_data()
+        lang = data.get("lang", "ru")
         if edit:
             await target.edit_text(t(lang, "ask_comment"))
         else:
@@ -337,6 +363,9 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
     category = data.get("checkout_category")
     await state.clear()
 
+    # Динамический расчет времени доставки относительно Китая
+    eta_text = _estimate_shipping_time(comment)
+
     items_for_order = [
         {"post_id": it["post_id"], "title": it.get("title"), "price": it.get("price"),
          "photo_file_id": it.get("photo_file_id"), "brand_id": it.get("brand_id")}
@@ -344,12 +373,19 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
     ]
     order_id = await repos.orders.create(user_tg_id, items_for_order, size, comment)
 
-    # Запоминаем размер (по категории) и адрес/комментарий для следующего заказа
     if category:
         await repos.users.set_size(user_tg_id, category, size)
     await repos.users.set_last_address(user_tg_id, comment)
 
-    text = t(lang, "order_received", order_id=order_id)
+    text = (
+        f"🎉 <b>Заказ #{order_id} успешно сформирован!</b>\n\n"
+        f"📦 <b>Состав заказа:</b>\n{_cart_lines(items)}\n\n"
+        f"📏 <b>Размер:</b> {size}\n"
+        f"📍 <b>Адрес / Город:</b> {comment}\n"
+        f"{eta_text}\n\n"
+        f"<i>Менеджер уже обрабатывает ваш заказ и свяжется с вами для уточнения оплаты!</i>"
+    )
+
     main_kb = await client_menu_kb(repos, user_tg_id, lang)
     if edit:
         await target.edit_text(text)
@@ -357,10 +393,10 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
     else:
         await target.answer(text, reply_markup=main_kb)
 
-    # Отдельным сообщением — кнопки редактирования/отмены, пока заказ не подтверждён админом
+    # Дополнительный блок для быстрой отмены/редактирования клиентом
     edit_hint = await tr(
         repos,
-        "Если заметили ошибку в размере или адресе — можно исправить, пока заказ не подтверждён администратором:",
+        "Если заметили ошибку в деталях заказа — вы можете исправить или отменить его ниже:",
         lang,
     )
     try:
@@ -370,14 +406,19 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
 
     await repos.cart.clear(user_tg_id)
 
+    # Уведомление администратора
     user = await repos.users.get(user_tg_id)
     username = f"@{user.get('username')}" if user and user.get("username") else f"ID {user_tg_id}"
     phone = user.get("phone", "—") if user else "—"
 
     admin_text = (
-        f"🛍 <b>Новый заказ #{order_id}</b>\n\n"
-        f"👤 Клиент: {username}\n📱 Телефон: {phone}\n📏 Размер: {size}\n💬 Комментарий: {comment}\n\n"
-        "<b>Товары:</b>\n" + _cart_lines(items)
+        f"🛍 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n\n"
+        f"👤 Клиент: {username}\n"
+        f"📱 Телефон: {phone}\n"
+        f"📏 Размер: {size}\n"
+        f"📍 Адрес/Город: {comment}\n"
+        f"🕒 Расчет: {eta_text}\n\n"
+        f"<b>Позиции:</b>\n{_cart_lines(items)}"
     )
 
     online_ids = await repos.staff.online_ids("admin")
@@ -388,7 +429,7 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
             pass
 
 
-# ── Уточнение деталей заказа у клиента (по запросу админа) ──────────
+# ── Уточнение деталей у клиента (админ) ──────────────────────────
 
 @router.callback_query(F.data.startswith("order:verify:"))
 async def cb_order_verify(call: CallbackQuery, repos: Repos, bot: Bot):
@@ -466,7 +507,7 @@ async def cb_client_verify_fix(call: CallbackQuery, state: FSMContext, repos: Re
     await call.answer()
 
 
-# ── Клиент сам редактирует/отменяет свой заказ (пока не подтверждён) ─
+# ── Мой заказ / Отмена / Редактирование ─────────────────────────
 
 @router.callback_query(F.data.startswith("myorder:edit:"))
 async def cb_myorder_edit(call: CallbackQuery, state: FSMContext, repos: Repos):
@@ -564,7 +605,6 @@ async def msg_fix_comment(message: Message, state: FSMContext, repos: Repos, bot
 
 @router.callback_query(F.data.startswith("wnotify:"))
 async def cb_wnotify(call: CallbackQuery, repos: Repos):
-    """Кнопка '🔔 Уведомить, когда появится' прямо под постом в канале отчётов склада."""
     user = await repos.users.get(call.from_user.id)
     lang = user.get("language", "ru") if user else "ru"
 
@@ -650,7 +690,7 @@ async def msg_wishlist(message: Message, repos: Repos):
         await message.answer(t(lang, "wishlist_empty"))
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
-    await message.answer(wishlist_title + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
+    await message.answer(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
 
 
 @router.callback_query(F.data == "go:wishlist")
@@ -664,7 +704,7 @@ async def cb_go_wishlist(call: CallbackQuery, repos: Repos):
         await call.answer()
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
-    await call.message.edit_text(wishlist_title + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
+    await call.message.edit_text(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
     await call.answer()
 
 
@@ -706,7 +746,7 @@ async def cb_wish_remove(call: CallbackQuery, repos: Repos):
         await call.answer("🗑")
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
-    await call.message.edit_text(wishlist_title + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
+    await call.message.edit_text(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
     await call.answer("🗑")
 
 
@@ -719,7 +759,7 @@ async def _order_summary_text(repos: Repos, order: dict, items: list[dict], lang
     status_text = await tr(repos, status_label(order["status"]), lang)
     status_word = await tr(repos, "Статус", lang)
     size_word = await tr(repos, "Размер", lang)
-    address_word = await tr(repos, "Адрес", lang)
+    address_word = await tr(repos, "Адрес/Детали", lang)
 
     template = await tr(repos, "📦 Заказ #ORDERID", lang)
     heading = template.replace("ORDERID", str(order["id"]))
@@ -788,234 +828,3 @@ async def msg_order_history(message: Message, repos: Repos):
 
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
     await message.answer(text, reply_markup=kb)
-
-
-# ── «Заказать снова» ──────────────────────────────────────────────────
-
-async def _notify_warehouse_restock(bot: Bot, repos: Repos, title: str, price: str,
-                                     photo_file_id: str | None, gender: str | None, username: str):
-    """Активно пингует склад, что клиент хочет повторить заказ товара, которого нет в наличии."""
-    text = (
-        f"🔁 <b>Запрос на дозаказ</b>\n\n"
-        f"🏷 {title}\n💰 {price}\n\n"
-        f"👤 Клиент {username} пытался заказать этот товар снова, но он сейчас отсутствует."
-    )
-    report_channel = await repos.settings.get(f"report_channel_{gender}_chat_id") if gender else None
-    if report_channel:
-        try:
-            if photo_file_id:
-                await bot.send_photo(report_channel, photo_file_id, caption=text)
-            else:
-                await bot.send_message(report_channel, text)
-        except Exception:
-            pass
-    wh_ids = await repos.staff.online_ids("warehouse")
-    for wh_id in wh_ids:
-        try:
-            await bot.send_message(wh_id, text)
-        except Exception:
-            pass
-
-
-async def _split_reorder_items(repos: Repos, items: list[dict]) -> tuple[list[dict], list[dict]]:
-    """
-    Проверяет каждую позицию старого заказа по актуальному состоянию каталога.
-    Возвращает (доступные_сейчас, недоступные) — доступные обновлены свежими
-    ценой/фото/названием на случай, если они изменились с прошлого заказа.
-    """
-    available, unavailable = [], []
-    for it in items:
-        post = await repos.posts.get(it["post_id"]) if it.get("post_id") else None
-        if post and post.get("in_stock", True):
-            available.append({
-                "post_id": post["id"], "title": post.get("title") or it.get("title"),
-                "price": post.get("price") or it.get("price"),
-                "photo_file_id": post.get("photo_file_id") or it.get("photo_file_id"),
-                "brand_id": post.get("brand_id") or it.get("brand_id"),
-                "gender": post.get("gender"), "category": post.get("category"),
-            })
-        else:
-            unavailable.append({
-                "post_id": it.get("post_id"),
-                "title": (post.get("title") if post else None) or it.get("title", "?"),
-                "price": (post.get("price") if post else None) or it.get("price", "—"),
-                "photo_file_id": (post.get("photo_file_id") if post else None) or it.get("photo_file_id"),
-                "gender": post.get("gender") if post else None,
-            })
-    return available, unavailable
-
-
-@router.callback_query(F.data.startswith("reorder:start:"))
-async def cb_reorder_start(call: CallbackQuery, repos: Repos, bot: Bot):
-    user = await repos.users.get(call.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-
-    order_id = int(call.data.split(":")[2])
-    order = await repos.orders.get(order_id)
-    if not order or order["user_tg_id"] != call.from_user.id:
-        await call.answer(await tr(repos, "❌ Заказ не найден", lang), show_alert=True)
-        return
-
-    items = await repos.orders.get_items(order_id)
-    available, unavailable = await _split_reorder_items(repos, items)
-    username = f"@{user.get('username')}" if user and user.get("username") else f"ID {call.from_user.id}"
-
-    if unavailable:
-        for it in unavailable:
-            if it.get("post_id"):
-                await repos.posts.add_interest(it["post_id"], call.from_user.id)
-            await _notify_warehouse_restock(
-                bot, repos, it["title"], it.get("price", "—"),
-                it.get("photo_file_id"), it.get("gender"), username,
-            )
-
-    if not available:
-        msg = await tt(repos, lang, "reorder_out_of_stock_all")
-        titles = "\n".join(f"• {it['title']}" for it in unavailable)
-        await call.answer()
-        await call.message.answer(f"{msg}\n\n{titles}")
-        return
-
-    kb_rows = []
-    repeat_label = (await tt(repos, lang, "reorder_repeat_btn")).format(size=order.get("size") or "—")
-    fresh_label = await tt(repos, lang, "reorder_fresh_btn")
-    kb_rows.append([InlineKeyboardButton(text=repeat_label, callback_data=f"reorder:repeat:{order_id}")])
-    kb_rows.append([InlineKeyboardButton(text=fresh_label, callback_data=f"reorder:fresh:{order_id}")])
-
-    lines = "\n".join(f"• {it['title']} — {it['price']}" for it in available)
-    text = lines
-    if unavailable:
-        warn = await tt(repos, lang, "reorder_partial_out_of_stock")
-        text = f"{warn}\n{lines}"
-
-    await call.answer()
-    await call.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
-
-
-@router.callback_query(F.data.startswith("reorder:repeat:"))
-async def cb_reorder_repeat(call: CallbackQuery, repos: Repos, bot: Bot):
-    user = await repos.users.get(call.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-
-    order_id = int(call.data.split(":")[2])
-    order = await repos.orders.get(order_id)
-    if not order or order["user_tg_id"] != call.from_user.id:
-        await call.answer(await tr(repos, "❌ Заказ не найден", lang), show_alert=True)
-        return
-
-    items = await repos.orders.get_items(order_id)
-    available, unavailable = await _split_reorder_items(repos, items)
-    if not available:
-        await call.answer(await tr(repos, "😔 Товар(ы) только что закончились. Оформление невозможно.", lang), show_alert=True)
-        return
-
-    size = order.get("size") or "—"
-    comment = order.get("comment") or "—"
-    category = available[0].get("category")
-
-    new_order_id = await repos.orders.create(call.from_user.id, available, size, comment)
-    if category:
-        await repos.users.set_size(call.from_user.id, category, size)
-    if comment and comment != "—":
-        await repos.users.set_last_address(call.from_user.id, comment)
-
-    await call.answer("✅")
-    await call.message.edit_text(t(lang, "order_received", order_id=new_order_id))
-
-    edit_hint = await tr(
-        repos,
-        "Если заметили ошибку в размере или адресе — можно исправить, пока заказ не подтверждён администратором:",
-        lang,
-    )
-    try:
-        await bot.send_message(call.from_user.id, edit_hint, reply_markup=await kb_my_order(repos, lang, new_order_id))
-    except Exception:
-        pass
-
-    username = f"@{user.get('username')}" if user and user.get("username") else f"ID {call.from_user.id}"
-    phone = user.get("phone", "—") if user else "—"
-    admin_text = (
-        f"🛍 <b>Новый заказ #{new_order_id}</b> (повтор заказа #{order_id})\n\n"
-        f"👤 Клиент: {username}\n📱 Телефон: {phone}\n📏 Размер: {size}\n💬 Комментарий: {comment}\n\n"
-        "<b>Товары:</b>\n" + _cart_lines(available)
-    )
-    online_ids = await repos.staff.online_ids("admin")
-    for admin_tg_id in online_ids:
-        try:
-            await bot.send_message(admin_tg_id, admin_text, reply_markup=kb_order_confirm(new_order_id))
-        except Exception:
-            pass
-
-
-@router.callback_query(F.data.startswith("reorder:fresh:"))
-async def cb_reorder_fresh(call: CallbackQuery, repos: Repos):
-    user = await repos.users.get(call.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-
-    order_id = int(call.data.split(":")[2])
-    order = await repos.orders.get(order_id)
-    if not order or order["user_tg_id"] != call.from_user.id:
-        await call.answer(await tr(repos, "❌ Заказ не найден", lang), show_alert=True)
-        return
-
-    items = await repos.orders.get_items(order_id)
-    available, _ = await _split_reorder_items(repos, items)
-    if not available:
-        await call.answer(await tr(repos, "😔 Товар(ы) только что закончились.", lang), show_alert=True)
-        return
-
-    for it in available:
-        await repos.cart.add(call.from_user.id, it["post_id"])
-
-    checkout_btn = await tt(repos, lang, "btn_checkout")
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=checkout_btn, callback_data="cart:checkout"),
-    ]])
-    await call.answer("✅")
-    await call.message.edit_text(await tt(repos, lang, "reorder_added_to_cart"), reply_markup=kb)
-
-
-# ── Подтверждение получения заказа и оценка ─────────────────────────
-
-@router.callback_query(F.data.startswith("myorder:received:"))
-async def cb_myorder_received(call: CallbackQuery, repos: Repos):
-    user = await repos.users.get(call.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-
-    order_id = int(call.data.split(":")[2])
-    order = await repos.orders.get(order_id)
-    if not order or order["user_tg_id"] != call.from_user.id:
-        await call.answer(await tr(repos, "❌ Заказ не найден", lang), show_alert=True)
-        return
-
-    if order["status"] not in ("shipping", "warehouse_received", "confirmed"):
-        await call.answer()
-        return
-
-    await repos.orders.update_status(order_id, "delivered")
-
-    prompt = (await tt(repos, lang, "order_rate_prompt")).format(order_id=order_id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=await tt(repos, lang, "btn_rating_yes"), callback_data=f"orderrating:yes:{order_id}"),
-        InlineKeyboardButton(text=await tt(repos, lang, "btn_rating_no"), callback_data=f"orderrating:no:{order_id}"),
-    ]])
-    await call.message.edit_text(prompt, reply_markup=kb)
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("orderrating:"))
-async def cb_order_rating(call: CallbackQuery, repos: Repos):
-    user = await repos.users.get(call.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-
-    _, verdict, order_id_str = call.data.split(":")
-    order_id = int(order_id_str)
-    order = await repos.orders.get(order_id)
-    if not order or order["user_tg_id"] != call.from_user.id:
-        await call.answer(await tr(repos, "❌ Заказ не найден", lang), show_alert=True)
-        return
-
-    await repos.orders.set_rating(order_id, 1 if verdict == "yes" else 0)
-    key = "order_rate_thanks" if verdict == "yes" else "order_rate_sorry"
-    await call.message.edit_text(await tt(repos, lang, key))
-    await call.answer()
