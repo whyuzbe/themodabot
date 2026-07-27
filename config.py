@@ -6,6 +6,12 @@ load_dotenv()
 
 
 class Config:
+    # Здесь твои старые переменные (BOT_TOKEN, базы и т.д.)
+    BOT_TOKEN: str = ...
+    # ...
+    
+    # Добавь эту строку в любое место внутри класса:
+    SESSION_HOURS: int = 8
     def __init__(self):
         self.BOT_TOKEN = os.getenv("BOT_TOKEN")
         self.REDIS_URL = os.getenv("REDIS_URL")
