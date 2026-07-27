@@ -34,4 +34,4 @@ class Repos:
         self.warehouse = WarehouseRepo(db)
         self.posts = PostsRepo(db)
         self.partners = PartnersRepo(db)
-        self.translation_cache = TranslationCacheRepo(db)
+        self.translation_cache = TranslationCacheRepo(db, redis=redis)
