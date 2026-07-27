@@ -73,8 +73,15 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     """
     display_gender = ("female" if gender == "male" else "male") if show_other else gender
 
+    # Защита от падения, если CATEGORIES в конфиге вдруг список, а не словарь
+    cats = CATEGORIES
+    if isinstance(cats, dict):
+        category_keys = cats.get(display_gender, [])
+    else:
+        category_keys = cats
+
     rows = []
-    for key in CATEGORIES[display_gender]:
+    for key in category_keys:
         label_key = f"btn_{'women' if display_gender == 'female' else 'men'}_{key}"
         text = await tt(repos, lang, label_key)
         url = urls.get(key)
@@ -176,7 +183,7 @@ def kb_order_confirm(order_id: int, verified: bool = False) -> InlineKeyboardMar
 async def kb_client_verify(repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_all_correct"), callback_data=f"client:verify_ok:{order_id}")],
-        [InlineKeyboardButton(text=await tt(repos, lang, "btn_need_fix"), callback_data=f"client:verify_fix:{order_id}")],
+        [InlineKeyboardButton(text=await tt(repos, lang, "btn_need_fix"), callback_data=f"client:verify_post_fix:{order_id}" if False else f"client:verify_fix:{order_id}")],
     ])
 
 
