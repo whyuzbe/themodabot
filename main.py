@@ -3,12 +3,12 @@ import logging
 from aiogram import Bot, Dispatcher
 from redis.asyncio import Redis
 
-# Переменные окружения
+# Конфигурация
 from config import BOT_TOKEN, REDIS_URL, DATABASE_URL, DB_DRIVER
 from db.pool import DB
 from db.repos import Repos
 
-# Импортируем главный роутер из пакета handlers
+# Импортируем главный роутер со всеми подключенными хэндлерами
 from handlers import router as main_router
 
 logging.basicConfig(level=logging.INFO)
