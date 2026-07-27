@@ -1,47 +1,27 @@
-import os
-from dataclasses import dataclass
-from dotenv import load_dotenv
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, Message
+from db.repos import Repos
 
-load_dotenv()
-
-# Экспортируем переменные напрямую для main.py
-BOT_TOKEN: str = os.getenv("BOT_TOKEN", "8707683137:AAHpCNdLbuGzNADSClM2y5J1QIzwArkAJlw")
-REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
+# Объявляем router, чтобы main и __init__.py его видели
+router = Router()
 
 
-@dataclass
-class Config:
-    BOT_TOKEN: str = BOT_TOKEN
-    REDIS_URL: str = REDIS_URL
-
-    DB_DRIVER: str = os.getenv("DB_DRIVER", "sqlite")
-    DB_PATH: str = os.getenv("DB_PATH", "themoda.db")          # для sqlite
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "")          # для postgres
-
-    BOOTSTRAP_MANAGER_LOGIN: str = os.getenv("BOOTSTRAP_MANAGER_LOGIN", "manager")
-    BOOTSTRAP_MANAGER_PASSWORD: str = os.getenv("BOOTSTRAP_MANAGER_PASSWORD", "changeme")
-
-    SESSION_HOURS: int = int(os.getenv("SESSION_HOURS", "8"))
-
-    REPORT_CHANNEL_ID: str = os.getenv("REPORT_CHANNEL_ID", "")  # канал отчётов склада
-
-    @property
-    def db_dsn_or_path(self) -> str:
-        return self.DATABASE_URL if self.DB_DRIVER == "postgres" else self.DB_PATH
+async def _category_urls(repos: Repos, gender: str) -> dict:
+    """Вспомогательная функция для получения ссылок/состояний категорий"""
+    try:
+        if hasattr(repos, "categories"):
+            return await repos.categories.get_urls(gender)
+    except Exception:
+        pass
+    return {}
 
 
-config = Config()
+@router.callback_query(F.data.startswith("cat:"))
+async def cb_category_select(call: CallbackQuery, repos: Repos):
+    """Обработчик выбора категории в каталоге"""
+    user = await repos.users.get(call.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    cat_id = call.data.split(":")[1]
 
-CATEGORIES = {
-    "male": {
-        "clothes":     "👔 Мужская одежда",
-        "shoes":       "👟 Мужская обувь",
-        "accessories": "⌚️ Мужские аксессуары",
-    },
-    "female": {
-        "clothes":     "👗 Женская одежда",
-        "shoes":       "👠 Женская обувь",
-        "accessories": "💍 Женские аксессуары",
-        "bags":        "👜 Женские сумки",
-    },
-}
+    # Здеь выводится список товаров или подкатегорий
+    await call.answer()
