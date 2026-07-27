@@ -34,13 +34,15 @@ async def main():
     await db.connect()
     await db.init_schema()
 
-    repos = Repos(db)
+    # Подключаем Redis
+    redis = Redis.from_url(config.REDIS_URL)
+
+    # Передаем redis в Repos для мгновенного кэширования текстов и настроек
+    repos = Repos(db, redis=redis)
     await staff_auth.ensure_bootstrap_manager(repos)
 
     bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
-    # Подключаем RedisStorage для устойчивости к высоким нагрузкам
-    redis = Redis.from_url(config.REDIS_URL)
     dp = Dispatcher(storage=RedisStorage(redis=redis))
 
     repo_mw = RepoMiddleware(repos)
@@ -50,14 +52,11 @@ async def main():
     @dp.errors()
     async def errors_handler(event: ErrorEvent):
         exc = event.exception
-        # Безвредная ошибка: пользователь нажал кнопку, ведущую на тот же текст/клавиатуру.
         if isinstance(exc, TelegramBadRequest) and "message is not modified" in str(exc):
             return True
         logger.exception("Необработанная ошибка в хендлере", exc_info=exc)
         return True
 
-    # Порядок важен: стафф-роутеры первыми (свои команды /admin /manager /warehouse),
-    # затем клиентские.
     dp.include_router(staff_auth.router)
     dp.include_router(staff_manager.router)
     dp.include_router(staff_admin.router)
@@ -75,6 +74,7 @@ async def main():
         await dp.start_polling(bot, skip_updates=True)
     finally:
         await db.close()
+        await redis.aclose()
 
 
 if __name__ == "__main__":
