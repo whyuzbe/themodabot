@@ -34,7 +34,8 @@ class TextsRepo:
             try:
                 cached = await self.redis.get(cache_key)
                 if cached is not None:
-                    return cached.decode("utf-8") if isinstance(cached, bytes) else cached
+                    result = cached.decode("utf-8") if isinstance(cached, bytes) else cached
+                    return result
             except Exception:
                 pass
 
@@ -57,6 +58,7 @@ class TextsRepo:
         )
         if self.redis:
             try:
+                # Сбрасываем/обновляем кэш в Redis мгновенно
                 await self.redis.set(f"bot_text:{key}", value, ex=CACHE_TTL)
             except Exception:
                 pass
