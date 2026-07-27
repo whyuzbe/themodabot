@@ -10,7 +10,6 @@ from keyboards.client_kb import kb_language, kb_gender, kb_categories
 from utils import client_menu_kb, with_warehouse_button
 from translate import tr
 
-# Обязательно в самом верху перед хендлерами
 router = Router()
 
 
@@ -31,15 +30,22 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos):
     if not opening_text:
         opening_text = await tt(repos, lang, "btn_catalog")
         
-    banner_file_id = await repos.settings.get("banner_file_id")
+    banner_file_id = await repos.settings.get("settings_banner_file_id")
+    if not banner_file_id:
+        banner_file_id = await repos.settings.get("banner_file_id")
+
     urls = await _category_urls(repos, gender)
     kb = await kb_categories(repos, lang, gender, urls)
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
-    if banner_file_id:
-        await message.answer_photo(banner_file_id, caption=opening_text, reply_markup=kb)
-    else:
-        await message.answer(opening_text, reply_markup=kb)
+    try:
+        if banner_file_id:
+            await message.answer_photo(banner_file_id, caption=opening_text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await message.answer(opening_text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        clean_text = opening_text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+        await message.answer(clean_text, reply_markup=kb)
 
 
 @router.message(CommandStart())
@@ -73,13 +79,11 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
         await show_catalog_entry(message, user, repos)
         return
 
-    # Собираем приветствие без тегов <b>
     welcome_parts = []
     for code in ("ru", "en", "uk", "es"):
         part = await repos.texts.get(f"text_welcome_{code}")
         if part:
-            clean_part = part.replace("<b>", "").replace("</b>", "")
-            welcome_parts.append(clean_part)
+            welcome_parts.append(part)
             
     if welcome_parts:
         welcome_text = "\n\n".join(welcome_parts)
@@ -88,7 +92,8 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
 
     await state.update_data(pending_payload=payload)
     await state.set_state(RegStates.choosing_language)
-    await message.answer(welcome_text, reply_markup=kb_language())
+    # Добавлен parse_mode="HTML", чтобы теги <b> и <i> рендерились корректно
+    await message.answer(welcome_text, reply_markup=kb_language(), parse_mode="HTML")
 
 
 @router.callback_query(RegStates.choosing_language, F.data.startswith("lang:"))
@@ -98,7 +103,7 @@ async def cb_choose_language(call: CallbackQuery, state: FSMContext, repos: Repo
     await repos.users.create(call.from_user.id, call.from_user.username, lang)
 
     choose_gender_text = await tt(repos, lang, "choose_gender")
-    await call.message.edit_text(choose_gender_text, reply_markup=await kb_gender(repos, lang))
+    await call.message.edit_text(choose_gender_text, reply_markup=await kb_gender(repos, lang), parse_mode="HTML")
     await state.set_state(RegStates.choosing_gender)
     await call.answer()
 
@@ -115,7 +120,7 @@ async def cb_choose_gender(call: CallbackQuery, state: FSMContext, repos: Repos)
 
     registered_ok_text = await tt(repos, lang, "registered_ok")
     main_menu_text = await tt(repos, lang, "main_menu")
-    await call.message.edit_text(registered_ok_text)
+    await call.message.edit_text(registered_ok_text, parse_mode="HTML")
     await call.message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, call.from_user.id, lang))
 
     if payload.startswith(("cart_", "wish_", "interest_")):
@@ -133,12 +138,13 @@ async def cb_choose_gender(call: CallbackQuery, state: FSMContext, repos: Repos)
 async def cb_go_main(call: CallbackQuery, state: FSMContext, repos: Repos):
     await state.clear()
     user = await repos.users.get(call.from_user.id)
-    await call.message.delete()
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
     await show_catalog_entry(call.message, user, repos)
     await call.answer()
 
-
-# ── /dell_num — клиент удаляет свой аккаунт ────────────────────────────
 
 @router.message(Command("dell_num"))
 async def cmd_dell_num(message: Message, repos: Repos):
