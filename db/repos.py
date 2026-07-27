@@ -3,6 +3,7 @@ Repos — единая точка доступа ко всем репозито�
 Прокидывается в aiogram Dispatcher как dp["repos"], доступен в хендлерах
 через параметр `repos: Repos`.
 """
+from redis.asyncio import Redis
 from db.pool import DB
 from db.repo_users import UsersRepo
 from db.repo_staff import StaffRepo
@@ -18,8 +19,9 @@ from db.repo_translation import TranslationCacheRepo
 
 
 class Repos:
-    def __init__(self, db: DB):
+    def __init__(self, db: DB, redis: Redis | None = None):
         self.db = db
+        self.redis = redis
         self.users = UsersRepo(db)
         self.staff = StaffRepo(db)
         self.brands = BrandsRepo(db)
@@ -27,8 +29,8 @@ class Repos:
         self.orders = OrdersRepo(db)
         self.finance = FinanceRepo(db)
         self.tickets = TicketsRepo(db)
-        self.texts = TextsRepo(db)
-        self.settings = SettingsRepo(db)
+        self.texts = TextsRepo(db, redis=redis)
+        self.settings = SettingsRepo(db, redis=redis)
         self.warehouse = WarehouseRepo(db)
         self.posts = PostsRepo(db)
         self.partners = PartnersRepo(db)
