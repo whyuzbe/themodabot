@@ -3,25 +3,33 @@ from aiogram import Router
 # Подключаем роутеры персонала (staff)
 from .staff import admin, auth, manager, partner, warehouse
 
-# Подключаем роутеры клиентов (client)
-# (Добавлены основные модули клиента)
+# Подключаем ВСЕ роутеры клиентов (client)
 from .client import (
     support,
-    # Если какие-то из этих файлов у тебя отсутствуют в client/,
-    # просто убери их из импорта ниже:
+    # Добавь сюда через запятую все файлы, которые у тебя есть в папке handlers/client/
+    # Пример (раскомментируй то, что у тебя есть):
+    # start,
+    # catalog,
+    # cart,
+    # profile,
 )
 
-# Главный роутер папки handlers
+# Главный роутер
 router = Router()
 
 # Регистрируем все роутеры в диспетчере
 router.include_routers(
-    # Staff роутеры
+    # Staff
     admin.router,
     auth.router,
     manager.router,
     partner.router,
     warehouse.router,
-    # Client роутеры
+    # Client
     support.router,
+    # Добавь сюда роутеры клиентов:
+    # start.router,
+    # catalog.router,
+    # cart.router,
+    # profile.router,
 )
