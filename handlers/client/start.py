@@ -18,13 +18,13 @@ class RegStates(StatesGroup):
     choosing_gender = State()
 
 
-async def show_catalog_entry(message: Message, user: dict | None, repos: Repos):
-    """Открыть опенинг с категориями (после регистрации / по кнопке Каталог)."""
+async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, override_gender: str | None = None):
+    """Открыть опенинг с категориями (после регистрации / по кнопке Каталог / переключение полов)."""
     from handlers.client.catalog import _category_urls
 
     user = user or {}
     lang = user.get("language", "ru")
-    gender = user.get("gender", "male")
+    gender = override_gender or user.get("gender", "male")
     
     opening_text = await repos.texts.get(f"text_opening_{lang}")
     if not opening_text:
@@ -34,8 +34,10 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos):
     if not banner_file_id:
         banner_file_id = await repos.settings.get("banner_file_id")
 
+    # Передаем противоположный пол для отображения кнопки смены каталога (show_other=True)
+    show_other = override_gender is not None and override_gender != user.get("gender", "male")
     urls = await _category_urls(repos, gender)
-    kb = await kb_categories(repos, lang, gender, urls)
+    kb = await kb_categories(repos, lang, gender, urls, show_other=show_other)
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
     try:
@@ -92,7 +94,6 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
 
     await state.update_data(pending_payload=payload)
     await state.set_state(RegStates.choosing_language)
-    # Добавлен parse_mode="HTML", чтобы теги <b> и <i> рендерились корректно
     await message.answer(welcome_text, reply_markup=kb_language(), parse_mode="HTML")
 
 
@@ -143,6 +144,19 @@ async def cb_go_main(call: CallbackQuery, state: FSMContext, repos: Repos):
     except Exception:
         pass
     await show_catalog_entry(call.message, user, repos)
+    await call.answer()
+
+
+# Хендлер для переключения между мужским и женским каталогами
+@router.callback_query(F.data.startswith("cat_back:"))
+async def cb_cat_back(call: CallbackQuery, repos: Repos):
+    target_gender = call.data.split(":")[1]
+    user = await repos.users.get(call.from_user.id)
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await show_catalog_entry(call.message, user, repos, override_gender=target_gender)
     await call.answer()
 
 
