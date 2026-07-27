@@ -58,6 +58,7 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     else:
         category_keys = cats
 
+    # Жестко прописанные нормальные эмодзи вместо коробок
     forced_names = {
         "clothing": "👕 Одежда",
         "shoes": "👟 Обувь",
@@ -67,7 +68,7 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
 
     rows = []
     for key in category_keys:
-        text = forced_names.get(key, f"📦 {key.capitalize()}")
+        text = forced_names.get(key, f"🛍 {key.capitalize()}")
 
         url = urls.get(key)
         if url:
