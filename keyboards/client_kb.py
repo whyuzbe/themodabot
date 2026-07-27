@@ -58,8 +58,13 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     else:
         category_keys = cats
 
-    # Точечные и уникальные иконки для каждой категории
+    # Маппинг под русские названия категорий из твоего config.py
     forced_names = {
+        "Одежда": "👕 Одежда",
+        "Обувь": "👟 Обувь",
+        "Аксессуары": "💍 Аксессуары",
+        "Сумки": "👜 Сумки",
+        # На всякий случай дублируем английские на случай динамических изменений
         "clothing": "👕 Одежда",
         "shoes": "👟 Обувь",
         "accessories": "💍 Аксессуары",
@@ -68,7 +73,8 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
 
     rows = []
     for key in category_keys:
-        text = forced_names.get(key, f"🛍 {key.capitalize()}")
+        # Берём иконку из словаря, если ключа нет — оставляем как есть
+        text = forced_names.get(key, f"📦 {key}")
 
         url = urls.get(key)
         if url:
