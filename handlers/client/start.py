@@ -36,23 +36,7 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
 
     show_other = override_gender is not None and override_gender != user.get("gender", "male")
     urls = await _category_urls(repos, gender)
-    
-    # Получаем клавиатуру и принудительно заменяем тексты на кнопках прямо здесь (гарантия от старого кэша)
     kb = await kb_categories(repos, lang, gender, urls, show_other=show_other)
-    
-    icon_map = {
-        "clothing": "👕 Одежда",
-        "shoes": "👟 Обувь",
-        "accessories": "💍 Аксессуары",
-        "bags": "👜 Сумки"
-    }
-    
-    for row in kb.inline_keyboard:
-        for btn in row:
-            for key, val in icon_map.items():
-                if key in btn.callback_data:
-                    btn.text = val
-
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
     try:
@@ -73,7 +57,7 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
 
     if user and user.get("is_blocked"):
         lang = user.get("language", "ru")
-        await message.answer(await tt(repos, lang, "blocked"))
+        await message.answer(await tt(repos, lang, "blocked"), parse_mode="HTML")
         return
 
     args = message.text.split()
@@ -92,7 +76,8 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
             await handle_deeplink(message, payload, repos)
             return
         main_menu_text = await tt(repos, lang, "main_menu")
-        await message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, message.from_user.id, lang))
+        # Исправлено: добавлен parse_mode="HTML", чтобы теги <b> отображались корректно
+        await message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, message.from_user.id, lang), parse_mode="HTML")
         await show_catalog_entry(message, user, repos)
         return
 
@@ -137,7 +122,8 @@ async def cb_choose_gender(call: CallbackQuery, state: FSMContext, repos: Repos)
     registered_ok_text = await tt(repos, lang, "registered_ok")
     main_menu_text = await tt(repos, lang, "main_menu")
     await call.message.edit_text(registered_ok_text, parse_mode="HTML")
-    await call.message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, call.from_user.id, lang))
+    # Исправлено: добавлен parse_mode="HTML"
+    await call.message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, call.from_user.id, lang), parse_mode="HTML")
 
     if payload.startswith(("cart_", "wish_", "interest_")):
         from handlers.client.cart import handle_deeplink
