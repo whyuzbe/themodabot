@@ -50,24 +50,21 @@ async def kb_main_menu(repos, lang: str) -> ReplyKeyboardMarkup:
 
 
 async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | None], show_other: bool = False) -> InlineKeyboardMarkup:
-    display_gender = ("female" if gender == "male" else "male") if show_other else gender
+    # Если show_other == True, значит мы смотрим противоположный каталог
+    current_gender = ("female" if gender == "male" else "male") if show_other else gender
 
     cats = CATEGORIES
     if isinstance(cats, dict):
-        category_keys = cats.get(display_gender, [])
+        category_keys = cats.get(current_gender, [])
     else:
         category_keys = cats
 
-    # Раздельные иконки для мужского и женского каталогов
+    # Иконки строго привязаны к отображаемому полу (current_gender)
     male_names = {
         "Одежда": "🧥 Мужская одежда",
         "Обувь": "👟 Мужская обувь",
         "Аксессуары": "🕶 Мужские аксессуары",
         "Сумки": "💼 Мужские сумки",
-        "clothing": "🧥 Мужская одежда",
-        "shoes": "👟 Мужская обувь",
-        "accessories": "🕶 Мужские аксессуары",
-        "bags": "💼 Мужские сумки"
     }
 
     female_names = {
@@ -75,28 +72,26 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
         "Обувь": "👠 Женская обувь",
         "Аксессуары": "💍 Женские аксессуары",
         "Сумки": "👜 Женские сумки",
-        "clothing": "👗 Женская одежда",
-        "shoes": "👠 Женская обувь",
-        "accessories": "💍 Женские аксессуары",
-        "bags": "👜 Женские сумки"
     }
 
-    current_names = female_names if display_gender == "female" else male_names
+    current_names = female_names if current_gender == "female" else male_names
 
     rows = []
     for key in category_keys:
         text = current_names.get(key, f"📦 {key}")
-
         url = urls.get(key)
         if url:
             rows.append([InlineKeyboardButton(text=text, url=url)])
         else:
-            rows.append([InlineKeyboardButton(text=text, callback_data=f"cat_no_channel:{display_gender}:{key}")])
+            rows.append([InlineKeyboardButton(text=text, callback_data=f"cat_no_channel:{current_gender}:{key}")])
 
+    # Кнопка переключения между каталогами и возврата
     if show_other:
+        # Если мы в чужом каталоге, кнопка должна возвращать в «свой» базовый каталог пользователя
         back_text = "🔙 В свой каталог"
         rows.append([InlineKeyboardButton(text=back_text, callback_data=f"cat_back:{gender}")])
     else:
+        # Если мы в своем каталоге, предлагаем посмотреть противоположный
         opposite = "female" if gender == "male" else "male"
         other_text = "👗 Женский каталог" if gender == "male" else "👔 Мужской каталог"
         rows.append([InlineKeyboardButton(text=other_text, callback_data=f"cat_back:{opposite}")])
