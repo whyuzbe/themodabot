@@ -58,7 +58,6 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     else:
         category_keys = cats
 
-    # Принудительные чистые названия и правильные эмодзи без всяких тегов <b>
     forced_names = {
         "clothing": "👕 Одежда",
         "shoes": "👟 Обувь",
@@ -68,7 +67,6 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
 
     rows = []
     for key in category_keys:
-        # Берем чистый текст из словаря выше, полностью игнорируя то, что забито в базе данных
         text = forced_names.get(key, f"📦 {key.capitalize()}")
 
         url = urls.get(key)
@@ -166,5 +164,5 @@ async def kb_client_verify(repos, lang: str, order_id: int) -> InlineKeyboardMar
 async def kb_my_order(repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_edit_order"), callback_data=f"myorder:edit:{order_id}")],
-        [InlineKeyboardButton(text=await repos.texts.get(f"btn_cancel_order") or "❌ Отменить заказ", callback_data=f"myorder:cancel:{order_id}")],
+        [InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"myorder:cancel:{order_id}")],
     ])
