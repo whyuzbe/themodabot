@@ -3,7 +3,8 @@ import logging
 from aiogram import Bot, Dispatcher
 from redis.asyncio import Redis
 
-from config import BOT_TOKEN, REDIS_URL
+# Импортируем также DATABASE_URL и DB_DRIVER
+from config import BOT_TOKEN, REDIS_URL, DATABASE_URL, DB_DRIVER
 from db.pool import DB
 from db.repos import Repos
 
@@ -45,7 +46,8 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    db = DB()
+    # Передаем параметры подключения в DB()
+    db = DB(driver=DB_DRIVER, dsn_or_path=DATABASE_URL)
     await db.connect()
 
     redis = Redis.from_url(REDIS_URL) if REDIS_URL else None
