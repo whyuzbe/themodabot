@@ -3,10 +3,14 @@ import logging
 from aiogram import Bot, Dispatcher
 from redis.asyncio import Redis
 
-# Импортируем также DATABASE_URL и DB_DRIVER
+# Переменные окружения
 from config import BOT_TOKEN, REDIS_URL, DATABASE_URL, DB_DRIVER
 from db.pool import DB
 from db.repos import Repos
+
+# Импорт твоих роутеров (замени/добавь свои при необходимости)
+# Например: from handlers import start_router, catalog_router, cart_router
+from handlers import main_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,15 +50,19 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # Передаем параметры подключения в DB()
+    # Подключение к базе данных и Redis
     db = DB(driver=DB_DRIVER, dsn_or_path=DATABASE_URL)
     await db.connect()
 
     redis = Redis.from_url(REDIS_URL) if REDIS_URL else None
     repos = Repos(db, redis=redis)
 
+    # Прокидываем зависимостей в контекст диспетчера
     dp["repos"] = repos
     dp["redis"] = redis
+
+    # Регистрация роутеров (подключи здесь все свои модули)
+    dp.include_router(main_router)
 
     # Запускаем фоновую очистку просроченных броней
     checker_task = asyncio.create_task(cart_expiration_checker(bot, repos))
