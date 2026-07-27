@@ -1,14 +1,21 @@
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла для локального запуска
+# Загружаем переменные из .env для локальной разработки
 load_dotenv()
 
-# Переменные окружения (считываются из Railway / .env)
+# Основные переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 REDIS_URL = os.getenv("REDIS_URL")
 DATABASE_URL = os.getenv("DATABASE_URL")
 DB_DRIVER = os.getenv("DB_DRIVER", "postgres")
+
+# Категории товаров (значение по умолчанию, если не задано)
+CATEGORIES = [
+    "Одежда",
+    "Обувь",
+    "Аксессуары",
+]
 
 # Проверка токена
 if not BOT_TOKEN:
