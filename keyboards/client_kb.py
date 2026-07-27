@@ -1,12 +1,3 @@
-"""
-Клиентские клавиатуры. После архитектурного рефакторинга — async и принимают
-repos, чтобы текст кнопок мог переводиться на ЛЮБОЙ язык (через tt()), а не
-только на 4 статически переведённых. Для тех 4 языков tt() работает мгновенно
-(словарь в памяти), для любого другого — переводит на лету с кэшированием.
-
-Стафф-клавиатуры (админ/менеджер/склад/партнёр) остаются на русском и не
-тронуты этим рефакторингом — см. handlers/staff/*.py.
-"""
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InlineKeyboardMarkup, InlineKeyboardButton,
@@ -67,6 +58,7 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     else:
         category_keys = cats
 
+    # Красивые эмодзи для категорий взамен стандартных папок
     fallback_names = {
         "clothing": "👕 Одежда",
         "shoes": "👟 Обувь",
@@ -80,7 +72,7 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
         text = await tt(repos, lang, label_key)
         
         if not text or text == label_key:
-            text = fallback_names.get(key, f"📁 {key.capitalize()}")
+            text = fallback_names.get(key, f"📦 {key.capitalize()}")
 
         url = urls.get(key)
         if url:
