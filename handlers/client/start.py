@@ -24,7 +24,10 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
 
     user = user or {}
     lang = user.get("language", "ru")
-    gender = override_gender or user.get("gender", "male")
+    user_gender = user.get("gender", "male")
+    
+    # Итоговый пол для показа
+    gender = override_gender or user_gender
     
     opening_text = await repos.texts.get(f"text_opening_{lang}")
     if not opening_text:
@@ -34,9 +37,11 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
     if not banner_file_id:
         banner_file_id = await repos.settings.get("banner_file_id")
 
-    show_other = override_gender is not None and override_gender != user.get("gender", "male")
+    # Исправлено: show_other истинно, если мы смотрим пол, отличный от базового пола пользователя
+    show_other = (override_gender is not None) and (override_gender != user_gender)
+    
     urls = await _category_urls(repos, gender)
-    kb = await kb_categories(repos, lang, gender, urls, show_other=show_other)
+    kb = await kb_categories(repos, lang, user_gender, urls, show_other=show_other)
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
     try:
@@ -76,7 +81,6 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
             await handle_deeplink(message, payload, repos)
             return
         main_menu_text = await tt(repos, lang, "main_menu")
-        # Исправлено: добавлен parse_mode="HTML", чтобы теги <b> отображались корректно
         await message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, message.from_user.id, lang), parse_mode="HTML")
         await show_catalog_entry(message, user, repos)
         return
@@ -122,7 +126,6 @@ async def cb_choose_gender(call: CallbackQuery, state: FSMContext, repos: Repos)
     registered_ok_text = await tt(repos, lang, "registered_ok")
     main_menu_text = await tt(repos, lang, "main_menu")
     await call.message.edit_text(registered_ok_text, parse_mode="HTML")
-    # Исправлено: добавлен parse_mode="HTML"
     await call.message.answer(main_menu_text, reply_markup=await client_menu_kb(repos, call.from_user.id, lang), parse_mode="HTML")
 
     if payload.startswith(("cart_", "wish_", "interest_")):
@@ -152,11 +155,16 @@ async def cb_go_main(call: CallbackQuery, state: FSMContext, repos: Repos):
 async def cb_cat_back(call: CallbackQuery, repos: Repos):
     target_gender = call.data.split(":")[1]
     user = await repos.users.get(call.from_user.id)
+    user_gender = user.get("gender", "male") if user else "male"
+    
     try:
         await call.message.delete()
     except Exception:
         pass
-    await show_catalog_entry(call.message, user, repos, override_gender=target_gender)
+        
+    # Если целевой пол равен базовому полу пользователя, сбрасываем override_gender в None (возвращаем «свой каталог»)
+    override = None if target_gender == user_gender else target_gender
+    await show_catalog_entry(call.message, user, repos, override_gender=override)
     await call.answer()
 
 
