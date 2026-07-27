@@ -25,7 +25,11 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos):
     user = user or {}
     lang = user.get("language", "ru")
     gender = user.get("gender", "male")
+    
     opening_text = await repos.texts.get(f"text_opening_{lang}")
+    if not opening_text:
+        opening_text = await tt(repos, lang, "btn_catalog") # Безопасный фоллбек
+        
     banner_file_id = await repos.settings.get("banner_file_id")
     urls = await _category_urls(repos, gender)
     kb = await kb_categories(repos, lang, gender, urls)
@@ -57,8 +61,6 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
         if partner:
             await repos.partners.register_referral(partner["login"], message.from_user.id)
 
-    # Регистрация теперь — только язык + пол. Телефон спрашиваем при первом
-    # оформлении заказа (см. handlers/client/cart.py), а не здесь.
     if user and user.get("gender"):
         lang = user.get("language", "ru")
         if payload.startswith(("cart_", "wish_", "interest_")):
@@ -70,14 +72,18 @@ async def cmd_start(message: Message, state: FSMContext, repos: Repos, bot: Bot)
         await show_catalog_entry(message, user, repos)
         return
 
-    # Язык клиента ещё не выбран — показываем приветствие сразу на всех
-    # 4 поддерживаемых языках (по порядку кнопок ниже), чтобы человек любой
-    # национальности понял, что делать дальше.
-    welcome_parts = [
-        await repos.texts.get(f"text_welcome_{code}")
-        for code in ("ru", "en", "uk", "es")
-    ]
-    welcome_text = "\n\n".join(welcome_parts)
+    # Безопасная сборка приветствий без мусора и лишних символов
+    welcome_parts = []
+    for code in ("ru", "en", "uk", "es"):
+        part = await repos.texts.get(f"text_welcome_{code}")
+        if part:
+            welcome_parts.append(part)
+            
+    if welcome_parts:
+        welcome_text = "\n\n".join(welcome_parts)
+    else:
+        welcome_text = "Welcome / Добро пожаловать / Вітаємо / Bienvenidos"
+
     await state.update_data(pending_payload=payload)
     await state.set_state(RegStates.choosing_language)
     await message.answer(welcome_text, reply_markup=kb_language())
