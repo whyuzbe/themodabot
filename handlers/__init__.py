@@ -4,20 +4,20 @@ from aiogram import Router
 from .staff import admin, auth, manager, partner, warehouse
 
 # Подключаем роутеры клиентов (client)
-from .client import cart, catalog, profile, start, support
+from .client import start, cart, catalog, profile, support
 
-# Главный роутер проекта
+# Главный роутер
 router = Router()
 
 # Регистрируем абсолютно все роутеры
 router.include_routers(
-    # Client роутеры
+    # Client
     start.router,
-    catalog.router,
     cart.router,
+    catalog.router,
     profile.router,
     support.router,
-    # Staff роутеры
+    # Staff
     admin.router,
     auth.router,
     manager.router,
