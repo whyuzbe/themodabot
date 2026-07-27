@@ -58,8 +58,8 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     else:
         category_keys = cats
 
-    # Красивые эмодзи для категорий взамен стандартных папок
-    fallback_names = {
+    # Принудительные чистые названия и правильные эмодзи без всяких тегов <b>
+    forced_names = {
         "clothing": "👕 Одежда",
         "shoes": "👟 Обувь",
         "accessories": "💍 Аксессуары",
@@ -68,11 +68,8 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
 
     rows = []
     for key in category_keys:
-        label_key = f"btn_{'women' if display_gender == 'female' else 'men'}_{key}"
-        text = await tt(repos, lang, label_key)
-        
-        if not text or text == label_key:
-            text = fallback_names.get(key, f"📦 {key.capitalize()}")
+        # Берем чистый текст из словаря выше, полностью игнорируя то, что забито в базе данных
+        text = forced_names.get(key, f"📦 {key.capitalize()}")
 
         url = urls.get(key)
         if url:
@@ -81,17 +78,11 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
             rows.append([InlineKeyboardButton(text=text, callback_data=f"cat_no_channel:{display_gender}:{key}")])
 
     if show_other:
-        own_key = "btn_my_catalog_m" if gender == "male" else "btn_my_catalog_f"
-        back_text = await tt(repos, lang, own_key)
-        if back_text == own_key: 
-            back_text = "🔙 В свой каталог"
+        back_text = "🔙 В свой каталог"
         rows.append([InlineKeyboardButton(text=back_text, callback_data=f"cat_back:{gender}")])
     else:
         opposite = "female" if gender == "male" else "male"
-        other_key = "btn_other_gender_f" if gender == "male" else "btn_other_gender_m"
-        other_text = await tt(repos, lang, other_key)
-        if other_text == other_key:
-            other_text = "👗 Женский каталог" if gender == "male" else "👔 Мужской каталог"
+        other_text = "👗 Женский каталог" if gender == "male" else "👔 Мужской каталог"
         rows.append([InlineKeyboardButton(text=other_text, callback_data=f"cat_back:{opposite}")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -175,5 +166,5 @@ async def kb_client_verify(repos, lang: str, order_id: int) -> InlineKeyboardMar
 async def kb_my_order(repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_edit_order"), callback_data=f"myorder:edit:{order_id}")],
-        [InlineKeyboardButton(text=await tt(repos, lang, "btn_cancel_order"), callback_data=f"myorder:cancel:{order_id}")],
+        [InlineKeyboardButton(text=await repos.texts.get(f"btn_cancel_order") or "❌ Отменить заказ", callback_data=f"myorder:cancel:{order_id}")],
     ])
