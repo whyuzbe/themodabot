@@ -11,17 +11,26 @@ class Config:
         self.REDIS_URL = os.getenv("REDIS_URL")
         self.DATABASE_URL = os.getenv("DATABASE_URL")
         self.DB_DRIVER = os.getenv("DB_DRIVER", "postgres")
-        self.CATEGORIES = [
-            "Одежда",
-            "Обувь",
-            "Аксессуары",
-        ]
+        self.CATEGORIES = {
+            "male": [
+                "Одежда",
+                "Обувь",
+                "Аксессуары",
+                "Сумки",
+            ],
+            "female": [
+                "Одежда",
+                "Обувь",
+                "Аксессуары",
+                "Сумки",
+            ]
+        }
 
 
-# Объект конфигурации (для от файла auth.py и других)
+# Объект конфигурации
 config = Config()
 
-# Отдельные переменные (для импортов в main.py и admin.py)
+# Отдельные переменные для импортов
 BOT_TOKEN = config.BOT_TOKEN
 REDIS_URL = config.REDIS_URL
 DATABASE_URL = config.DATABASE_URL
