@@ -1,0 +1,1026 @@
+from io import BytesIO
+from datetime import datetime
+
+from aiogram import Router, F, Bot
+from aiogram.types import (
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile,
+)
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
+from config import CATEGORIES
+from db.repos import Repos
+from handlers.staff.auth import require_role
+from utils import safe_edit
+
+router = Router()
+
+
+def kb_manager() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Общая статистика", callback_data="mgr:stats")],
+        [InlineKeyboardButton(text="💰 Финансы", callback_data="mgr:finance")],
+        [InlineKeyboardButton(text="📥 Экспорт в Excel", callback_data="mgr:export")],
+        [InlineKeyboardButton(text="✏️ Тексты и баннер", callback_data="mgr:texts")],
+        [InlineKeyboardButton(text="👁 Просмотр каналов и разделов", callback_data="mgr:overview")],
+        [InlineKeyboardButton(text="📂 Разделы (топики)", callback_data="mgr:brands")],
+        [InlineKeyboardButton(text="📡 Каналы (муж/жен)", callback_data="mgr:channels")],
+        [InlineKeyboardButton(text="📦 Канал отчётов склада", callback_data="mgr:report_channel")],
+        [InlineKeyboardButton(text="➕ Создать аккаунт", callback_data="mgr:create_account")],
+        [InlineKeyboardButton(text="🗑 Удалить аккаунт", callback_data="mgr:delete_account")],
+        [InlineKeyboardButton(text="👥 Список аккаунтов", callback_data="mgr:list_accounts")],
+        [InlineKeyboardButton(text="🔑 Сменить свой пароль", callback_data="mgr:change_my_password")],
+        [InlineKeyboardButton(text="🚪 Выйти", callback_data="mgr:logout")],
+    ])
+
+
+def kb_back_manager() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")]])
+
+
+async def show_manager_panel(message: Message):
+    await message.answer("🧑‍💼 <b>Панель менеджера</b>", reply_markup=kb_manager())
+
+
+class ManagerStates(StatesGroup):
+    create_role = State()
+    create_login = State()
+    create_password = State()
+    create_commission = State()
+    change_my_password = State()
+    delete_login = State()
+    editing_text = State()
+    channel_gender = State()
+    channel_chat_id = State()
+    channel_invite_url = State()
+    brand_gender = State()
+    brand_category = State()
+    brand_name = State()
+    brand_emoji = State()
+    report_channel_id = State()
+    report_channel_url = State()
+
+
+@router.callback_query(F.data == "mgr:logout")
+async def cb_logout(call: CallbackQuery, state: FSMContext, repos: Repos):
+    await repos.staff.delete_session(call.from_user.id)
+    await state.clear()
+    await safe_edit(call.message, "👋 Вы вышли из панели менеджера.")
+    await call.answer()
+
+
+@router.callback_query(F.data == "mgr:back")
+async def cb_back(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await state.clear()
+    await safe_edit(call.message, "🧑‍💼 <b>Панель менеджера</b>", reply_markup=kb_manager())
+    await call.answer()
+
+
+# ── Статистика ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "mgr:stats")
+async def cb_stats(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    s = await repos.users.stats()
+    o = await repos.orders.stats()
+    p = await repos.posts.stats()
+
+    admins = await repos.staff.list_by_role("admin")
+    ticket_stats = await repos.tickets.all_admin_stats_today([a["login"] for a in admins])
+    ticket_lines = "\n".join(
+        f"  👤 <b>{t['login']}</b>: взято {t['taken']} / закрыто {t['closed']} / ожидание {t['waiting']} | 👍{t['satisfied']} 👎{t['unsatisfied']}"
+        for t in ticket_stats
+    ) or "  —"
+
+    text = (
+        "📊 <b>Общая статистика</b>\n\n"
+        f"👥 Пользователи: <b>{s['total']}</b> (👨{s['males']} 👩{s['females']})\n"
+        f"  Сегодня: {s['today']} / Неделя: {s['week']} / Месяц: {s['month']}\n\n"
+        f"📦 Публикации: <b>{p['total']}</b>\n"
+        f"  Сегодня: {p['today']} / Неделя: {p['week']} / Месяц: {p['month']}\n\n"
+        f"🛍 Заказы: <b>{o['total']}</b>\n"
+        f"  Сегодня: {o['today']} / Неделя: {o['week']} / Месяц: {o['month']}\n\n"
+        f"🎧 Поддержка сегодня:\n{ticket_lines}"
+    )
+    await safe_edit(call.message, text, reply_markup=kb_back_manager())
+    await call.answer()
+
+
+# ── Финансы ───────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "mgr:finance")
+async def cb_finance(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    today = await repos.finance.summary(days=1)
+    week = await repos.finance.summary(days=7)
+    month = await repos.finance.summary(days=30)
+    total = await repos.finance.summary()
+
+    def fmt(s):
+        return f"выручка {s['revenue']:.2f} / прибыль {s['profit']:.2f} ({s['entries']} зап.)"
+
+    text = (
+        "💰 <b>Финансовая аналитика</b>\n\n"
+        f"Сегодня: {fmt(today)}\n"
+        f"Неделя: {fmt(week)}\n"
+        f"Месяц: {fmt(month)}\n"
+        f"Всего: {fmt(total)}\n\n"
+        "<i>Записи добавляются складом при оформлении фотоотчёта о выполненном заказе.</i>"
+    )
+    await safe_edit(call.message, text, reply_markup=kb_back_manager())
+    await call.answer()
+
+
+# ── Экспорт в Excel ─────────────────────────────────────────────────
+
+@router.callback_query(F.data == "mgr:export")
+async def cb_export(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    await call.answer("⏳ Генерирую файл...")
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+
+    ws_users = wb.active
+    ws_users.title = "Пользователи"
+    headers_u = ["ID", "TG ID", "Username", "Телефон", "Пол", "Язык", "Дата регистрации"]
+    for col, h in enumerate(headers_u, 1):
+        c = ws_users.cell(row=1, column=col, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="2C3E50")
+
+    users = await repos.users.all()
+    for i, u in enumerate(users, 2):
+        ws_users.cell(row=i, column=1, value=i - 1)
+        ws_users.cell(row=i, column=2, value=u.get("tg_id"))
+        ws_users.cell(row=i, column=3, value=u.get("username") or "—")
+        ws_users.cell(row=i, column=4, value=u.get("phone") or "—")
+        ws_users.cell(row=i, column=5, value="Мужской" if u.get("gender") == "male" else "Женский")
+        ws_users.cell(row=i, column=6, value=(u.get("language") or "?").upper())
+        ws_users.cell(row=i, column=7, value=str(u.get("registered_at", "")))
+
+    ws_fin = wb.create_sheet("Финансы")
+    summary = await repos.finance.summary()
+    rows = [("Выручка", summary["revenue"]), ("Себестоимость", summary["cost"]), ("Прибыль", summary["profit"])]
+    for i, (k, v) in enumerate(rows, 1):
+        ws_fin.cell(row=i, column=1, value=k).font = Font(bold=True)
+        ws_fin.cell(row=i, column=2, value=float(v))
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"themoda_report_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    await call.message.answer_document(BufferedInputFile(buf.read(), filename=filename), caption="📥 Отчёт готов!")
+
+
+# ── Каналы (муж/жен) ────────────────────────────────────────────────
+
+def kb_channels_menu() -> InlineKeyboardMarkup:
+    rows = []
+    for gender in ("male", "female"):
+        for key, label in CATEGORIES[gender].items():
+            rows.append([InlineKeyboardButton(text=label, callback_data=f"mgr:channel_set:{gender}:{key}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+CATEGORY_LABELS_FLAT = {
+    ("male", "clothes"): "👔 Муж. одежда", ("male", "shoes"): "👟 Муж. обувь",
+    ("male", "accessories"): "⌚️ Муж. аксессуары",
+    ("female", "clothes"): "👗 Жен. одежда", ("female", "shoes"): "👠 Жен. обувь",
+    ("female", "accessories"): "💍 Жен. аксессуары", ("female", "bags"): "👜 Жен. сумки",
+}
+
+
+@router.callback_query(F.data == "mgr:overview")
+async def cb_overview(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    channels = await repos.brands.list_channels()
+    by_key = {(c["gender"], c["category"]): c for c in channels}
+    brands = await repos.brands.list_all_brands()
+
+    lines = ["👁 <b>Каналы и разделы</b>\n"]
+
+    for gender in ("male", "female"):
+        for key, label in CATEGORIES[gender].items():
+            ch = by_key.get((gender, key))
+            cat_label = CATEGORY_LABELS_FLAT.get((gender, key), label)
+            lines.append(f"\n<b>{cat_label}</b>")
+            if ch:
+                lines.append(f"  📡 {ch['chat_id']}")
+            else:
+                lines.append("  📡 канал не настроен")
+
+            cat_brands = [b for b in brands if b["gender"] == gender and b["category"] == key]
+            if cat_brands:
+                for b in cat_brands:
+                    lines.append(f"  • {b['emoji']} {b['name']} (topic_id={b['topic_id']})")
+            else:
+                lines.append("  • разделов пока нет")
+
+    report_male = await repos.settings.get("report_channel_male_chat_id")
+    report_female = await repos.settings.get("report_channel_female_chat_id")
+    lines.append(
+        f"\n<b>📦 Каналы отчётов склада</b>\n"
+        f"  👨 {report_male or 'не настроен'}\n  👩 {report_female or 'не настроен'}"
+    )
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n…"
+
+    await safe_edit(call.message, text, reply_markup=kb_back_manager())
+    await call.answer()
+
+
+# ── Канал отчётов склада ────────────────────────────────────────────
+
+def kb_report_channel_gender() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👨 Мужской", callback_data="mgr:report_gender:male")],
+        [InlineKeyboardButton(text="👩 Женский", callback_data="mgr:report_gender:female")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")],
+    ])
+
+
+@router.callback_query(F.data == "mgr:report_channel")
+async def cb_report_channel(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    male_id = await repos.settings.get("report_channel_male_chat_id")
+    female_id = await repos.settings.get("report_channel_female_chat_id")
+    text = (
+        "📦 <b>Каналы отчётов склада</b>\n\n"
+        f"👨 Мужской: <code>{male_id or 'не настроен'}</code>\n"
+        f"👩 Женский: <code>{female_id or 'не настроен'}</code>\n\n"
+        "Выберите, какой канал настроить:"
+    )
+    await safe_edit(call.message, text, reply_markup=kb_report_channel_gender())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mgr:report_gender:"))
+async def cb_report_gender(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    gender = call.data.split(":")[2]
+    await state.update_data(report_gender=gender)
+    await state.set_state(ManagerStates.report_channel_id)
+    label = "Мужской" if gender == "male" else "Женский"
+    await safe_edit(call.message,
+        f"📦 <b>Канал отчётов склада — {label}</b>\n\n"
+        "Введите ID или @username канала, куда склад будет публиковать фотоотчёты "
+        "по товарам этого пола:",
+        reply_markup=kb_back_manager(),
+    )
+    await call.answer()
+
+
+@router.message(ManagerStates.report_channel_id)
+async def msg_report_channel_id(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    value = message.text.strip()
+    is_numeric = value.lstrip("-").isdigit()
+    is_username = value.startswith("@") and len(value) > 1
+    if not (is_numeric or is_username):
+        await message.answer("⚠️ Введите числовой ID (-100...) или @username канала:")
+        return
+
+    data = await state.get_data()
+    gender = data.get("report_gender", "male")
+    await repos.settings.set(f"report_channel_{gender}_chat_id", value)
+    await state.update_data(report_chat_id=value)
+    await state.set_state(ManagerStates.report_channel_url)
+    await message.answer(
+        "Теперь введите публичную ссылку на этот канал — она будет показана клиентам "
+        "как кнопка «🔥 Витрина пополнений» (например https://t.me/themodawarehousemen):"
+    )
+
+
+@router.message(ManagerStates.report_channel_url)
+async def msg_report_channel_url(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    gender = data.get("report_gender", "male")
+    url = message.text.strip()
+    await repos.settings.set(f"report_channel_{gender}_url", url)
+    await state.clear()
+
+    label = "Мужской" if gender == "male" else "Женский"
+    await message.answer(
+        f"✅ Канал отчётов склада ({label}) сохранён!\n"
+        f"ID: <code>{data.get('report_chat_id')}</code>\nСсылка: {url}\n\n"
+        "💡 Не забудь добавить бота админом в этот канал.",
+        reply_markup=kb_manager(),
+    )
+
+
+@router.callback_query(F.data == "mgr:channels")
+async def cb_channels(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    channels = await repos.brands.list_channels()
+    by_key = {(c["gender"], c["category"]): c for c in channels}
+
+    lines = []
+    for gender in ("male", "female"):
+        for key, label in CATEGORIES[gender].items():
+            c = by_key.get((gender, key))
+            lines.append(f"{label}: {c['chat_id'] if c else '—'}")
+
+    text = "📡 <b>Каналы (7 шт — пол × категория)</b>\n\n" + "\n".join(lines)
+    await safe_edit(call.message, text, reply_markup=kb_channels_menu())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mgr:channel_set:"))
+async def cb_channel_set(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    _, _, gender, category = call.data.split(":")
+    await state.update_data(channel_gender=gender, channel_category=category)
+    await state.set_state(ManagerStates.channel_chat_id)
+    label = CATEGORIES[gender][category]
+    await safe_edit(call.message,
+        f"Настройка канала: <b>{label}</b>\n\n"
+        "Введите ID или username супергруппы:\n"
+        "• Для приватной группы — числовой ID (формат -100xxxxxxxxxx)\n"
+        "• Для публичной группы — @username (например @themodaclothes)\n\n"
+        "💡 Бот должен быть админом в группе, форум-режим (топики) включён."
+    )
+    await call.answer()
+
+
+@router.message(ManagerStates.channel_chat_id)
+async def msg_channel_chat_id(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+    chat_id = message.text.strip()
+    is_numeric = chat_id.lstrip("-").isdigit()
+    is_username = chat_id.startswith("@") and len(chat_id) > 1
+    if not (is_numeric or is_username):
+        await message.answer("⚠️ Введите числовой ID (-100...) или @username группы. Попробуйте снова:")
+        return
+    await state.update_data(channel_chat_id=chat_id)
+    await state.set_state(ManagerStates.channel_invite_url)
+    await message.answer(
+        "Введите ссылку-базу для топиков.\n"
+        "• Приватная группа: https://t.me/c/1234567890 (без номера топика в конце)\n"
+        "• Публичная группа: https://t.me/themodaclothes (без номера топика в конце)"
+    )
+
+
+@router.message(ManagerStates.channel_invite_url)
+async def msg_channel_invite_url(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+    data = await state.get_data()
+    await repos.brands.set_channel(
+        data["channel_gender"], data["channel_category"], data["channel_chat_id"], message.text.strip()
+    )
+    await state.clear()
+    await message.answer("✅ Канал сохранён!", reply_markup=kb_manager())
+
+
+# ── Бренды (топики) ───────────────────────────────────────────────────
+
+def kb_brand_gender() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👨 Мужской", callback_data="brand_new:male")],
+        [InlineKeyboardButton(text="👩 Женский", callback_data="brand_new:female")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:brands")],
+    ])
+
+
+def kb_brand_category(gender: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"brand_cat:{gender}:{key}")]
+            for key, label in CATEGORIES[gender].items()]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:brands")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data == "mgr:brands")
+async def cb_brands_menu(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await state.clear()
+    await safe_edit(call.message,
+        "📂 <b>Разделы</b>\n\nКаждый раздел — топик в канале (муж/жен). Раздел может быть брендом (для обуви) или типом товара (для одежды/аксессуаров).",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить раздел", callback_data="brand_add")],
+            [InlineKeyboardButton(text="🗑 Удалить раздел", callback_data="brand_del_menu")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")],
+        ]),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "brand_add")
+async def cb_brand_add(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await safe_edit(call.message, "➕ Выберите пол:", reply_markup=kb_brand_gender())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("brand_new:"))
+async def cb_brand_gender(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    gender = call.data.split(":")[1]
+    await safe_edit(call.message, "Выберите категорию:", reply_markup=kb_brand_category(gender))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("brand_cat:"))
+async def cb_brand_category(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    _, gender, category = call.data.split(":")
+    await state.update_data(brand_gender=gender, brand_category=category)
+    await state.set_state(ManagerStates.brand_name)
+    await safe_edit(call.message, "Введите название раздела (например GUCCI, или Куртки, или Часы):")
+    await call.answer()
+
+
+@router.message(ManagerStates.brand_name)
+async def msg_brand_name(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+    await state.update_data(brand_name=message.text.strip().upper())
+    await state.set_state(ManagerStates.brand_emoji)
+    await message.answer("Введите эмодзи раздела (например 👔):")
+
+
+@router.message(ManagerStates.brand_emoji)
+async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos, bot: Bot):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    emoji = message.text.strip()
+    data = await state.get_data()
+    gender = data["brand_gender"]
+    category = data["brand_category"]
+    name = data["brand_name"]
+    await state.clear()
+
+    channel = await repos.brands.get_channel(gender, category)
+    if not channel:
+        cat_label = CATEGORIES.get(gender, {}).get(category, "")
+        await message.answer(
+            f"❌ Для раздела «{cat_label}» сначала нужно настроить канал.\n"
+            "Зайди в «📡 Каналы» и укажи chat_id + ссылку для этой категории, потом повтори создание раздела.",
+            reply_markup=kb_manager(),
+        )
+        return
+
+    try:
+        topic = await bot.create_forum_topic(chat_id=channel["chat_id"], name=f"{emoji} {name}")
+    except Exception as e:
+        await message.answer(
+            f"❌ Не удалось создать топик в группе: <code>{e}</code>\n\n"
+            "Проверь:\n"
+            "• Бот добавлен админом в эту группу\n"
+            "• У бота включено право «Manage Topics» (Управление темами)\n"
+            "• Группа реально супергруппа с включённым режимом Topics\n"
+            "• chat_id в «📡 Каналы» указан верно",
+            reply_markup=kb_manager(),
+        )
+        return
+
+    brand_id = await repos.brands.create(
+        name=name, emoji=emoji, gender=gender, category=category,
+        topic_id=topic.message_thread_id,
+    )
+    cat_label = CATEGORIES.get(gender, {}).get(category, "")
+    await message.answer(
+        f"✅ <b>Раздел создан, топик в группе создан автоматически!</b>\n\n"
+        f"{emoji} <b>{name}</b>\n📂 {cat_label}\n🆔 topic_id: {topic.message_thread_id}",
+        reply_markup=kb_manager(),
+    )
+
+
+# ── Удаление разделов (топиков) ─────────────────────────────────────────
+
+def kb_brand_del_gender() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👨 Мужской", callback_data="brand_delg:male")],
+        [InlineKeyboardButton(text="👩 Женский", callback_data="brand_delg:female")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:brands")],
+    ])
+
+
+def kb_brand_del_category(gender: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"brand_delc:{gender}:{key}")]
+            for key, label in CATEGORIES[gender].items()]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="brand_del_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_brand_del_pick(gender: str, category: str, brands: list[dict]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=f"{b['emoji']} {b['name']}", callback_data=f"brand_delpick:{b['id']}")]
+            for b in brands]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"brand_delg:{gender}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_brand_del_confirm(brand_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"brand_delyes:{brand_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="mgr:brands")],
+    ])
+
+
+@router.callback_query(F.data == "brand_del_menu")
+async def cb_brand_del_menu(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await safe_edit(call.message, "🗑 Удаление раздела\n\nВыберите пол:", reply_markup=kb_brand_del_gender())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("brand_delg:"))
+async def cb_brand_del_gender(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    gender = call.data.split(":")[1]
+    await safe_edit(call.message, "Выберите категорию:", reply_markup=kb_brand_del_category(gender))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("brand_delc:"))
+async def cb_brand_del_category(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    _, gender, category = call.data.split(":")
+    brands = await repos.brands.list(gender, category)
+    if not brands:
+        await call.answer("В этой категории пока нет разделов.", show_alert=True)
+        return
+    await safe_edit(call.message, "🗑 Выберите раздел для удаления:",
+                     reply_markup=kb_brand_del_pick(gender, category, brands))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("brand_delpick:"))
+async def cb_brand_del_pick(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    brand_id = int(call.data.split(":")[1])
+    brand = await repos.brands.get(brand_id)
+    if not brand:
+        await call.answer("Раздел не найден.", show_alert=True)
+        return
+    await safe_edit(
+        call.message,
+        f"⚠️ Удалить раздел «{brand['emoji']} {brand['name']}»?\n\n"
+        "Товары этого раздела останутся в истории заказов, но раздел исчезнет из каталога и списков.\n"
+        "Топик в канале Telegram, если получится, тоже будет закрыт/удалён.",
+        reply_markup=kb_brand_del_confirm(brand_id),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("brand_delyes:"))
+async def cb_brand_del_confirm(call: CallbackQuery, repos: Repos, bot: Bot):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    brand_id = int(call.data.split(":")[1])
+    brand = await repos.brands.get(brand_id)
+    if not brand:
+        await call.answer("Раздел не найден.", show_alert=True)
+        return
+
+    channel = await repos.brands.get_channel(brand["gender"], brand["category"])
+    if channel and brand.get("topic_id"):
+        try:
+            await bot.delete_forum_topic(chat_id=channel["chat_id"], message_thread_id=brand["topic_id"])
+        except Exception:
+            pass  # нет прав / топик уже удалён вручную — не критично, всё равно скрываем раздел в боте
+
+    await repos.brands.deactivate(brand_id)
+    await call.message.answer(
+        f"✅ Раздел «{brand['emoji']} {brand['name']}» удалён.",
+        reply_markup=kb_manager(),
+    )
+    await call.answer()
+
+
+# ── Создание/удаление стафф-аккаунтов ──────────────────────────────────
+
+def kb_role_select() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛠 Админ", callback_data="acc_role:admin")],
+        [InlineKeyboardButton(text="📦 Склад", callback_data="acc_role:warehouse")],
+        [InlineKeyboardButton(text="🤝 Партнёр", callback_data="acc_role:partner")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")],
+    ])
+
+
+def kb_delete_role_select() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛠 Админ", callback_data="del_role:admin")],
+        [InlineKeyboardButton(text="📦 Склад", callback_data="del_role:warehouse")],
+        [InlineKeyboardButton(text="🤝 Партнёр", callback_data="del_role:partner")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")],
+    ])
+
+
+@router.callback_query(F.data == "mgr:delete_account")
+async def cb_delete_account_menu(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await safe_edit(call.message, "🗑 <b>Удаление аккаунта</b>\n\nВыберите роль:", reply_markup=kb_delete_role_select())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("del_role:"))
+async def cb_delete_role(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    role = call.data.split(":")[1]
+    if role == "partner":
+        accounts = await repos.staff.list_partners()
+    else:
+        accounts = await repos.staff.list_by_role(role)
+
+    if not accounts:
+        await call.answer("Аккаунтов этой роли нет.", show_alert=True)
+        return
+
+    rows = [[InlineKeyboardButton(text=f"🗑 {a['login']}", callback_data=f"del_acc:{role}:{a['login']}")] for a in accounts]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:delete_account")])
+    await safe_edit(call.message, "🗑 Выберите аккаунт для удаления:", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("del_acc:"))
+async def cb_delete_account_confirm_ask(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    _, role, login = call.data.split(":")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"del_acc_yes:{role}:{login}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"del_role:{role}")],
+    ])
+    await safe_edit(
+        call.message,
+        f"⚠️ Удалить аккаунт <code>{login}</code> ({role})?\nЭто действие нельзя отменить.",
+        reply_markup=kb,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("del_acc_yes:"))
+async def cb_delete_account_do(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    _, role, login = call.data.split(":")
+    ok = await repos.staff.delete_account(role, login)
+
+    if ok:
+        await safe_edit(call.message, f"✅ Аккаунт <code>{login}</code> ({role}) удалён.", reply_markup=kb_back_manager())
+    else:
+        await safe_edit(call.message, f"❌ Не удалось удалить <code>{login}</code>.", reply_markup=kb_back_manager())
+    await call.answer()
+
+
+@router.callback_query(F.data == "mgr:create_account")
+async def cb_create_account(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await safe_edit(call.message, "➕ Выберите роль для нового аккаунта:", reply_markup=kb_role_select())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("acc_role:"))
+async def cb_acc_role(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    role = call.data.split(":")[1]
+    await state.update_data(new_role=role)
+    await state.set_state(ManagerStates.create_login)
+    await safe_edit(call.message, f"➕ Создание аккаунта ({role})\n\nВведите логин:")
+    await call.answer()
+
+
+@router.message(ManagerStates.create_login)
+async def msg_create_login(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+    login = message.text.strip()
+    if len(login) < 3:
+        await message.answer("⚠️ Логин минимум 3 символа:")
+        return
+    await state.update_data(new_login=login)
+    await state.set_state(ManagerStates.create_password)
+    await message.answer("Придумайте пароль (минимум 4 символа):")
+
+
+@router.message(ManagerStates.create_password)
+async def msg_create_password(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    role = data.get("new_role")
+    login = data.get("new_login")
+    password = message.text.strip()
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if len(password) < 4:
+        await message.answer("⚠️ Пароль слишком короткий:")
+        return
+
+    if role == "partner":
+        await state.update_data(new_password=password)
+        await state.set_state(ManagerStates.create_commission)
+        await message.answer("Введите процент комиссии партнёра (например 7 или 7.5):")
+        return
+
+    ok = await repos.staff.create_account(role, login, password)
+    await state.clear()
+
+    if ok:
+        await message.answer(
+            f"✅ <b>Аккаунт создан!</b>\n👤 {login} ({role})\nВход: /{role}",
+            reply_markup=kb_manager(),
+        )
+    else:
+        await message.answer(f"❌ Логин <code>{login}</code> занят.", reply_markup=kb_manager())
+
+
+@router.message(ManagerStates.create_commission)
+async def msg_create_commission(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    try:
+        commission_pct = float(message.text.strip().replace(",", "."))
+        if commission_pct < 0 or commission_pct > 100:
+            raise ValueError
+    except ValueError:
+        await message.answer("⚠️ Введите число от 0 до 100 (например 7 или 7.5):")
+        return
+
+    data = await state.get_data()
+    login = data.get("new_login")
+    password = data.get("new_password")
+    await state.clear()
+
+    ref_code = await repos.staff.create_partner_account(login, password, commission_pct)
+
+    if ref_code:
+        bot_me = await message.bot.get_me()
+        link = f"https://t.me/{bot_me.username}?start=ref_{ref_code}"
+        await message.answer(
+            f"✅ <b>Партнёр создан!</b>\n👤 {login}\n📈 Комиссия: {commission_pct}%\n"
+            f"🔗 Ссылка: <code>{link}</code>\n\nВход партнёра: /partner",
+            reply_markup=kb_manager(),
+        )
+    else:
+        await message.answer(f"❌ Логин <code>{login}</code> занят.", reply_markup=kb_manager())
+
+
+@router.callback_query(F.data == "mgr:change_my_password")
+async def cb_change_my_password(call: CallbackQuery, state: FSMContext, repos: Repos):
+    session = await require_role(call.from_user.id, repos, "manager")
+    if not session:
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await state.set_state(ManagerStates.change_my_password)
+    await safe_edit(
+        call.message,
+        f"🔑 <b>Смена пароля</b>\n\nВы вошли как <code>{session['login']}</code>.\n"
+        "Введите новый пароль (минимум 4 символа):",
+        reply_markup=kb_back_manager(),
+    )
+    await call.answer()
+
+
+@router.message(ManagerStates.change_my_password)
+async def msg_change_my_password(message: Message, state: FSMContext, repos: Repos):
+    session = await require_role(message.from_user.id, repos, "manager")
+    if not session:
+        await state.clear()
+        return
+
+    new_password = message.text.strip()
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if len(new_password) < 4:
+        await message.answer("⚠️ Пароль слишком короткий, минимум 4 символа. Попробуйте снова:")
+        return
+
+    ok = await repos.staff.change_password("manager", session["login"], new_password)
+    await state.clear()
+
+    if ok:
+        await message.answer("✅ Пароль успешно изменён!", reply_markup=kb_manager())
+    else:
+        await message.answer("❌ Не удалось изменить пароль.", reply_markup=kb_manager())
+
+
+@router.callback_query(F.data == "mgr:list_accounts")
+async def cb_list_accounts(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    admins = await repos.staff.list_by_role("admin")
+    wh = await repos.staff.list_by_role("warehouse")
+    partners = await repos.staff.list_partners()
+
+    lines = ["<b>🛠 Админы:</b>"]
+    lines += [f"  • {a['login']} {'🟢' if a['is_online'] else '⚪️'}" for a in admins] or ["  —"]
+    lines.append("\n<b>📦 Склад:</b>")
+    lines += [f"  • {w['login']} {'🟢' if w['is_online'] else '⚪️'}" for w in wh] or ["  —"]
+    lines.append("\n<b>🤝 Партнёры:</b>")
+    lines += [
+        f"  • {p['login']} {'🟢' if p['is_online'] else '⚪️'} | {p['commission_pct']}%"
+        for p in partners
+    ] or ["  —"]
+
+    await safe_edit(call.message, "\n".join(lines), reply_markup=kb_back_manager())
+    await call.answer()
+
+
+# ── Тексты и баннер ────────────────────────────────────────────────────
+
+TEXT_LABELS = {
+    "text_welcome_ru": "👋 Приветствие (RU)",
+    "text_welcome_en": "👋 Приветствие (EN)",
+    "text_welcome_uk": "👋 Приветствие (UK)",
+    "text_welcome_es": "👋 Приветствие (ES)",
+    "text_opening_ru": "🏠 Опенинг каталога (RU)",
+    "text_opening_en": "🏠 Опенинг каталога (EN)",
+    "text_opening_uk": "🏠 Опенинг каталога (UK)",
+    "text_opening_es": "🏠 Опенинг каталога (ES)",
+    "text_support_ru": "💬 Текст поддержки (RU)",
+    "text_support_en": "💬 Текст поддержки (EN)",
+    "text_support_uk": "💬 Текст поддержки (UK)",
+    "text_support_es": "💬 Текст поддержки (ES)",
+}
+
+
+def kb_texts_menu() -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"mgr:edit:{key}")] for key, label in TEXT_LABELS.items()]
+    rows.append([InlineKeyboardButton(text="🖼 Баннер", callback_data="mgr:banner")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_text_actions(key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить", callback_data=f"mgr:do_edit:{key}")],
+        [InlineKeyboardButton(text="🔄 Сбросить", callback_data=f"mgr:reset:{key}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:texts")],
+    ])
+
+
+@router.callback_query(F.data == "mgr:texts")
+async def cb_texts_menu(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await state.clear()
+    await safe_edit(call.message, "✏️ <b>Тексты и баннер</b>", reply_markup=kb_texts_menu())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mgr:edit:"))
+async def cb_text_view(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    key = call.data.split("mgr:edit:")[1]
+    current = await repos.texts.get(key)
+    preview = current[:800] + ("..." if len(current) > 800 else "")
+    await safe_edit(call.message,
+        f"📄 <b>{TEXT_LABELS.get(key, key)}</b>\n\n<blockquote>{preview}</blockquote>",
+        reply_markup=kb_text_actions(key),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mgr:do_edit:"))
+async def cb_text_start_edit(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    key = call.data.split("mgr:do_edit:")[1]
+    await state.set_state(ManagerStates.editing_text)
+    await state.update_data(editing_key=key)
+    await safe_edit(call.message, f"✏️ Отправьте новый текст для «{TEXT_LABELS.get(key,key)}»:")
+    await call.answer()
+
+
+@router.message(ManagerStates.editing_text)
+async def msg_text_save(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+    data = await state.get_data()
+    key = data.get("editing_key")
+    new_text = message.text or message.caption or ""
+    if not new_text.strip():
+        await message.answer("⚠️ Текст не может быть пустым:")
+        return
+    await repos.texts.set(key, new_text)
+    await state.clear()
+    await message.answer("✅ Обновлено!", reply_markup=kb_texts_menu())
+
+
+@router.callback_query(F.data.startswith("mgr:reset:"))
+async def cb_text_reset(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    key = call.data.split("mgr:reset:")[1]
+    await repos.texts.reset(key)
+    await call.answer("✅ Сброшено!", show_alert=True)
+
+
+@router.callback_query(F.data == "mgr:banner")
+async def cb_banner(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    current = await repos.settings.get("banner_file_id")
+    status = "✅ Загружен" if current else "❌ Не загружен"
+    await state.set_state(ManagerStates.editing_text)
+    await state.update_data(editing_key="__banner__")
+    await safe_edit(call.message, f"🖼 <b>Баннер</b>\nСтатус: {status}\n\nОтправьте новое фото:")
+    await call.answer()
+
+
+@router.message(ManagerStates.editing_text, F.photo)
+async def msg_banner_upload(message: Message, state: FSMContext, repos: Repos):
+    data = await state.get_data()
+    if data.get("editing_key") != "__banner__":
+        return
+    await repos.settings.set("banner_file_id", message.photo[-1].file_id)
+    await state.clear()
+    await message.answer_photo(message.photo[-1].file_id, caption="✅ Баннер обновлён!", reply_markup=kb_manager())
