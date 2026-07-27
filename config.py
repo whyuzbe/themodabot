@@ -7,7 +7,7 @@ load_dotenv()
 
 @dataclass
 class Config:
-    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    BOT_TOKEN: str = os.getenv("8707683137:AAHpCNdLbuGzNADSClM2y5J1QIzwArkAJlw", "")
 
     # Ссылка для быстрой FSM-памяти Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
