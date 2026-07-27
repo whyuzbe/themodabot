@@ -37,11 +37,12 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
     if not banner_file_id:
         banner_file_id = await repos.settings.get("banner_file_id")
 
-    # Исправлено: show_other истинно, если мы смотрим пол, отличный от базового пола пользователя
+    # show_other истинно, если мы смотрим пол, отличный от базового пола пользователя
     show_other = (override_gender is not None) and (override_gender != user_gender)
     
     urls = await _category_urls(repos, gender)
-    kb = await kb_categories(repos, lang, user_gender, urls, show_other=show_other)
+    # Передаем именно 'gender' (текущий отображаемый), чтобы иконки менялись корректно
+    kb = await kb_categories(repos, lang, gender, urls, show_other=show_other)
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
     try:
