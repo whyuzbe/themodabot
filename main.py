@@ -1,80 +1,70 @@
 import asyncio
 import logging
-
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import ErrorEvent
 from redis.asyncio import Redis
 
-from config import config
+from config import BOT_TOKEN, REDIS_URL
 from db.pool import DB
 from db.repos import Repos
-from middlewares import RepoMiddleware
 
-from handlers.staff import auth as staff_auth
-from handlers.staff import manager as staff_manager
-from handlers.staff import admin as staff_admin
-from handlers.staff import warehouse as staff_warehouse
-from handlers.staff import partner as staff_partner
-from handlers.client import start as client_start
-from handlers.client import catalog as client_catalog
-from handlers.client import cart as client_cart
-from handlers.client import profile as client_profile
-from handlers.client import support as client_support
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(name)s | %(levelname)s | %(message)s")
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+async def cart_expiration_checker(bot: Bot, repos: Repos):
+    """Фоновая задача: раз в минуту очищает товары из корзины, которые пролежали > 45 минут"""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            expired_items = await repos.cart.clear_expired(minutes=45)
+
+            if expired_items:
+                logger.info(f"⏳ Снята бронь с {len(expired_items)} товаров в корзинах.")
+                for item in expired_items:
+                    user_id = item["user_tg_id"]
+                    try:
+                        await bot.send_message(
+                            chat_id=user_id,
+                            text=(
+                                "⏳ <b>Время брони истекло</b>\n\n"
+                                "Товар из вашей корзины вернулся в общий каталог, так как время ожидания (45 мин) завершилось.\n\n"
+                                "💡 <i>Вы всегда можете повторно добавить его из каталога или Избранного!</i>"
+                            ),
+                            parse_mode="HTML",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Ошибка в фоновой проверке корзины: {e}")
+
+
 async def main():
-    db = DB(config.DB_DRIVER, config.db_dsn_or_path)
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+
+    db = DB()
     await db.connect()
-    await db.init_schema()
 
-    # Подключаем Redis
-    redis = Redis.from_url(config.REDIS_URL)
-
-    # Передаем redis в Repos для мгновенного кэширования текстов и настроек
+    redis = Redis.from_url(REDIS_URL) if REDIS_URL else None
     repos = Repos(db, redis=redis)
-    await staff_auth.ensure_bootstrap_manager(repos)
 
-    bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp["repos"] = repos
+    dp["redis"] = redis
 
-    dp = Dispatcher(storage=RedisStorage(redis=redis))
+    # Запускаем фоновую очистку просроченных броней
+    checker_task = asyncio.create_task(cart_expiration_checker(bot, repos))
 
-    repo_mw = RepoMiddleware(repos)
-    dp.message.outer_middleware(repo_mw)
-    dp.callback_query.outer_middleware(repo_mw)
-
-    @dp.errors()
-    async def errors_handler(event: ErrorEvent):
-        exc = event.exception
-        if isinstance(exc, TelegramBadRequest) and "message is not modified" in str(exc):
-            return True
-        logger.exception("Необработанная ошибка в хендлере", exc_info=exc)
-        return True
-
-    dp.include_router(staff_auth.router)
-    dp.include_router(staff_manager.router)
-    dp.include_router(staff_admin.router)
-    dp.include_router(staff_warehouse.router)
-    dp.include_router(staff_partner.router)
-
-    dp.include_router(client_start.router)
-    dp.include_router(client_profile.router)
-    dp.include_router(client_catalog.router)
-    dp.include_router(client_cart.router)
-    dp.include_router(client_support.router)
-
-    logger.info("Бот запущен ✅")
     try:
+        logger.info("🚀 Бот успешно запущен!")
         await dp.start_polling(bot, skip_updates=True)
     finally:
+        checker_task.cancel()
         await db.close()
-        await redis.aclose()
+        if redis:
+            await redis.aclose()
 
 
 if __name__ == "__main__":
