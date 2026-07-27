@@ -41,6 +41,18 @@ class CartRepo:
         )
         return bool(val)
 
+    async def clear_expired(self, minutes: int = 45) -> list[dict]:
+        """Удаляет просроченные товары из корзины и возвращает удалённые элементы для уведомления клиентов"""
+        rows = await self.db.fetch(
+            """
+            DELETE FROM cart
+            WHERE added_at < NOW() - ($1 || ' minutes')::INTERVAL
+            RETURNING user_tg_id, post_id
+            """,
+            minutes,
+        )
+        return [dict(r) for r in rows]
+
     # ── wishlist ─────────────────────────────────────────────
 
     async def wish_add(self, user_tg_id: int, post_id: int) -> bool:
