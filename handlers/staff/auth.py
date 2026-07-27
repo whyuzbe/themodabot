@@ -47,7 +47,7 @@ def _login_cmd(role: str):
 
         await state.set_state(AuthStates.waiting_login)
         await state.update_data(auth_role=role)
-        await message.answer(f"🔐 <b>Вход ({role})</b>\n\nВведите логин:")
+        await message.answer(f"🔐 <b>Вход ({role})</b>\n\nВведите логин:", parse_mode="HTML")
     return handler
 
 
@@ -92,7 +92,7 @@ async def msg_password(message: Message, state: FSMContext, repos: Repos):
     await repos.staff.create_session(message.from_user.id, role, login, hours=config.SESSION_HOURS)
 
     await message.answer("🔒", reply_markup=ReplyKeyboardRemove())
-    await message.answer(f"✅ Добро пожаловать, {role} <b>{login}</b>!")
+    await message.answer(f"✅ Добро пожаловать, {role} <b>{login}</b>!", parse_mode="HTML")
 
     session = await repos.staff.get_session(message.from_user.id)
     await _show_panel(message, role, session)
