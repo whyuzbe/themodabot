@@ -15,9 +15,6 @@ from locales.texts import t, tt
 from config import CATEGORIES
 
 
-# ── Язык / пол / телефон (используются до того, как язык известен либо
-#    содержат только собственные имена языков — не требуют перевода) ──
-
 def kb_language() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
@@ -61,29 +58,30 @@ async def kb_main_menu(repos, lang: str) -> ReplyKeyboardMarkup:
     )
 
 
-# ── Каталог: категории по полу ────────────────────────────────────
-
 async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | None], show_other: bool = False) -> InlineKeyboardMarkup:
-    """
-    Каждая категория — сразу прямая ссылка на канал этой категории (без списка
-    разделов внутри бота). Клиент сам видит все топики в Telegram и выбирает.
-    urls: {category_key: invite_url_или_None}
-    show_other=False — обычный режим: категории своего пола + кнопка "посмотреть другой пол"
-    show_other=True  — режим просмотра чужого каталога: категории другого пола + кнопка "назад в свой"
-    """
     display_gender = ("female" if gender == "male" else "male") if show_other else gender
 
-    # Защита от падения, если CATEGORIES в конфиге вдруг список, а не словарь
     cats = CATEGORIES
     if isinstance(cats, dict):
         category_keys = cats.get(display_gender, [])
     else:
         category_keys = cats
 
+    fallback_names = {
+        "clothing": "👕 Одежда",
+        "shoes": "👟 Обувь",
+        "accessories": "💍 Аксессуары",
+        "bags": "👜 Сумки"
+    }
+
     rows = []
     for key in category_keys:
         label_key = f"btn_{'women' if display_gender == 'female' else 'men'}_{key}"
         text = await tt(repos, lang, label_key)
+        
+        if not text or text == label_key:
+            text = fallback_names.get(key, f"📁 {key.capitalize()}")
+
         url = urls.get(key)
         if url:
             rows.append([InlineKeyboardButton(text=text, url=url)])
@@ -92,16 +90,20 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
 
     if show_other:
         own_key = "btn_my_catalog_m" if gender == "male" else "btn_my_catalog_f"
-        rows.append([InlineKeyboardButton(text=await tt(repos, lang, own_key), callback_data=f"cat_back:{gender}")])
+        back_text = await tt(repos, lang, own_key)
+        if back_text == own_key: 
+            back_text = "🔙 В свой каталог"
+        rows.append([InlineKeyboardButton(text=back_text, callback_data=f"cat_back:{gender}")])
     else:
         opposite = "female" if gender == "male" else "male"
         other_key = "btn_other_gender_f" if gender == "male" else "btn_other_gender_m"
-        rows.append([InlineKeyboardButton(text=await tt(repos, lang, other_key), callback_data=f"cat_back:{opposite}")])
+        other_text = await tt(repos, lang, other_key)
+        if other_text == other_key:
+            other_text = "👗 Женский каталог" if gender == "male" else "👔 Мужской каталог"
+        rows.append([InlineKeyboardButton(text=other_text, callback_data=f"cat_back:{opposite}")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-
-# ── Профиль ────────────────────────────────────────────────────────
 
 async def kb_profile(repos, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -113,9 +115,6 @@ async def kb_profile(repos, lang: str) -> InlineKeyboardMarkup:
 
 
 def kb_language_profile(lang: str) -> InlineKeyboardMarkup:
-    # Названия языков — собственные имена (Русский/English/Українська/Español),
-    # они всегда показываются в своём же написании независимо от текущего
-    # языка интерфейса — переводить их не нужно, поэтому функция синхронная.
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t(lang, "lang_ru"), callback_data="profile_lang:ru"),
          InlineKeyboardButton(text=t(lang, "lang_en"), callback_data="profile_lang:en")],
@@ -124,8 +123,6 @@ def kb_language_profile(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="go:profile")],
     ])
 
-
-# ── Корзина / Wishlist ─────────────────────────────────────────────
 
 async def kb_cart(repos, lang: str, items: list[dict]) -> InlineKeyboardMarkup:
     fallback_title = await tt(repos, lang, "fallback_item_title")
@@ -165,8 +162,6 @@ async def kb_after_add(repos, lang: str) -> InlineKeyboardMarkup:
     ])
 
 
-# ── Заказ: подтверждение админом (СТАФФ — остаётся на русском) ─────
-
 def kb_order_confirm(order_id: int, verified: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if verified:
@@ -178,17 +173,14 @@ def kb_order_confirm(order_id: int, verified: bool = False) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-# ── Заказ: клиентская сторона (переводится на язык клиента) ────────
-
 async def kb_client_verify(repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_all_correct"), callback_data=f"client:verify_ok:{order_id}")],
-        [InlineKeyboardButton(text=await tt(repos, lang, "btn_need_fix"), callback_data=f"client:verify_post_fix:{order_id}" if False else f"client:verify_fix:{order_id}")],
+        [InlineKeyboardButton(text=await tt(repos, lang, "btn_need_fix"), callback_data=f"client:verify_fix:{order_id}")],
     ])
 
 
 async def kb_my_order(repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
-    """Кнопки под собственным заказом клиента — пока админ его не подтвердил."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_edit_order"), callback_data=f"myorder:edit:{order_id}")],
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_cancel_order"), callback_data=f"myorder:cancel:{order_id}")],
