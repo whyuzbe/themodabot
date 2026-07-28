@@ -1,8 +1,10 @@
 import datetime
+from contextlib import suppress
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest
 
 from db.repos import Repos
 from locales.texts import t, tt
@@ -158,14 +160,17 @@ async def cb_go_cart(call: CallbackQuery, repos: Repos):
     items = await repos.cart.get(call.from_user.id)
 
     if not items:
-        await call.message.edit_text(t(lang, "cart_empty"))
+        with suppress(TelegramBadRequest):
+            await call.message.edit_text(t(lang, "cart_empty"))
         await call.answer()
         return
 
     cart_title = await tt(repos, lang, "cart_title")
     timer_info = _get_cart_timer_info(items)
     text = f"{cart_title}\n{_cart_lines(items)}\n{timer_info}"
-    await call.message.edit_text(text, reply_markup=await kb_cart(repos, lang, items))
+    
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=await kb_cart(repos, lang, items))
     await call.answer()
 
 
@@ -178,13 +183,16 @@ async def cb_cart_remove(call: CallbackQuery, repos: Repos):
 
     items = await repos.cart.get(call.from_user.id)
     if not items:
-        await call.message.edit_text(t(lang, "cart_empty"))
+        with suppress(TelegramBadRequest):
+            await call.message.edit_text(t(lang, "cart_empty"))
         await call.answer("🗑")
         return
     cart_title = await tt(repos, lang, "cart_title")
     timer_info = _get_cart_timer_info(items)
     text = f"{cart_title}\n{_cart_lines(items)}\n{timer_info}"
-    await call.message.edit_text(text, reply_markup=await kb_cart(repos, lang, items))
+    
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(text, reply_markup=await kb_cart(repos, lang, items))
     await call.answer("🗑")
 
 
@@ -193,7 +201,9 @@ async def cb_cart_clear(call: CallbackQuery, repos: Repos):
     user = await repos.users.get(call.from_user.id)
     lang = user.get("language", "ru") if user else "ru"
     await repos.cart.clear(call.from_user.id)
-    await call.message.edit_text(t(lang, "cart_empty"))
+    
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(t(lang, "cart_empty"))
     await call.answer()
 
 
@@ -226,7 +236,8 @@ async def cb_checkout(call: CallbackQuery, state: FSMContext, repos: Repos):
         await call.message.answer(f"{msg}\n\n{titles}")
 
     if not available:
-        await call.message.edit_text(t(lang, "cart_empty"))
+        with suppress(TelegramBadRequest):
+            await call.message.edit_text(t(lang, "cart_empty"))
         await call.answer()
         return
 
@@ -234,7 +245,8 @@ async def cb_checkout(call: CallbackQuery, state: FSMContext, repos: Repos):
 
     if not user or not user.get("phone"):
         await state.set_state(CartStates.waiting_phone)
-        await call.message.delete()
+        with suppress(TelegramBadRequest):
+            await call.message.delete()
         msg = await tr(repos, "📱 Для оформления заказа поделитесь номером телефона:", lang)
         await call.message.answer(msg, reply_markup=await kb_share_phone(repos, lang))
         await call.answer()
@@ -274,14 +286,16 @@ async def _proceed_to_size(target, state: FSMContext, repos: Repos, items: list[
         )
         kb = kb_reuse_or_manual(f"Использовать {saved_size}", "checkout:size:saved", "checkout:size:manual")
         if edit:
-            await target.edit_text(text, reply_markup=kb)
+            with suppress(TelegramBadRequest):
+                await target.edit_text(text, reply_markup=kb)
         else:
             await target.answer(text, reply_markup=kb)
     else:
         await state.set_state(CartStates.waiting_size)
         text = t(lang, "ask_size")
         if edit:
-            await target.edit_text(text)
+            with suppress(TelegramBadRequest):
+                await target.edit_text(text)
         else:
             await target.answer(text)
 
@@ -301,7 +315,8 @@ async def cb_size_manual(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     lang = data.get("lang", "ru")
     await state.set_state(CartStates.waiting_size)
-    await call.message.edit_text(t(lang, "ask_size"))
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(t(lang, "ask_size"))
     await call.answer()
 
 
@@ -318,7 +333,8 @@ async def _ask_comment_step(target, state: FSMContext, repos: Repos, user_tg_id:
         text = f"💬 Ваш сохранённый адрес/город:\n<i>{last_address}</i>\n\nИспользовать его или указать другой?"
         kb = kb_reuse_or_manual("Использовать этот", "checkout:comment:saved", "checkout:comment:manual")
         if edit:
-            await target.edit_text(text, reply_markup=kb)
+            with suppress(TelegramBadRequest):
+                await target.edit_text(text, reply_markup=kb)
         else:
             await target.answer(text, reply_markup=kb)
     else:
@@ -326,7 +342,8 @@ async def _ask_comment_step(target, state: FSMContext, repos: Repos, user_tg_id:
         data = await state.get_data()
         lang = data.get("lang", "ru")
         if edit:
-            await target.edit_text(t(lang, "ask_comment"))
+            with suppress(TelegramBadRequest):
+                await target.edit_text(t(lang, "ask_comment"))
         else:
             await target.answer(t(lang, "ask_comment"))
 
@@ -344,7 +361,8 @@ async def cb_comment_manual(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     lang = data.get("lang", "ru")
     await state.set_state(CartStates.waiting_comment)
-    await call.message.edit_text(t(lang, "ask_comment"))
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(t(lang, "ask_comment"))
     await call.answer()
 
 
@@ -388,7 +406,8 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
 
     main_kb = await client_menu_kb(repos, user_tg_id, lang)
     if edit:
-        await target.edit_text(text)
+        with suppress(TelegramBadRequest):
+            await target.edit_text(text)
         await target.answer(t(lang, "main_menu"), reply_markup=main_kb)
     else:
         await target.answer(text, reply_markup=main_kb)
@@ -459,10 +478,11 @@ async def cb_order_verify(call: CallbackQuery, repos: Repos, bot: Bot):
         await call.answer("❌ Не удалось связаться с клиентом.", show_alert=True)
         return
 
-    await call.message.edit_text(
-        call.message.text + f"\n\n📞 <b>Отправлен запрос клиенту на проверку заказа #{order_id}.</b>",
-        reply_markup=kb_order_confirm(order_id),
-    )
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(
+            call.message.text + f"\n\n📞 <b>Отправлен запрос клиенту на проверку заказа #{order_id}.</b>",
+            reply_markup=kb_order_confirm(order_id),
+        )
     await call.answer("Запрос отправлен клиенту")
 
 
@@ -475,7 +495,8 @@ async def cb_client_verify_ok(call: CallbackQuery, repos: Repos, bot: Bot):
         return
 
     await repos.orders.set_client_verified(order_id, True)
-    await call.message.edit_text("✅ Спасибо, заказ подтверждён! Передаём администратору.")
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text("✅ Спасибо, заказ подтверждён! Передаём администратору.")
     await call.answer()
 
     online_ids = await repos.staff.online_ids("admin")
@@ -495,7 +516,8 @@ async def cb_client_verify_ok(call: CallbackQuery, repos: Repos, bot: Bot):
 async def _start_order_fix(message_target, state: FSMContext, order_id: int, lang: str):
     await state.set_state(CartStates.fixing_size)
     await state.update_data(fixing_order_id=order_id, lang=lang)
-    await message_target.edit_text(t(lang, "ask_size"))
+    with suppress(TelegramBadRequest):
+        await message_target.edit_text(t(lang, "ask_size"))
 
 
 @router.callback_query(F.data.startswith("client:verify_fix:"))
@@ -555,7 +577,9 @@ async def cb_myorder_cancel(call: CallbackQuery, repos: Repos, bot: Bot):
 
     await repos.orders.update_status(order_id, "cancelled")
     cancel_template = await tr(repos, "❌ Заказ #ORDERID отменён.", lang)
-    await call.message.edit_text(cancel_template.replace("ORDERID", str(order_id)))
+    
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(cancel_template.replace("ORDERID", str(order_id)))
     await call.answer()
 
     online_ids = await repos.staff.online_ids("admin")
@@ -650,8 +674,9 @@ async def cb_order_confirm(call: CallbackQuery, repos: Repos, bot: Bot):
                 await bot.send_message(wh["tg_id"], wh_text)
             except Exception:
                 pass
-
-    await call.message.edit_text(call.message.text + f"\n\n✅ <b>Подтверждено {call.from_user.first_name}</b>")
+    
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(call.message.text + f"\n\n✅ <b>Подтверждено {call.from_user.first_name}</b>")
     await call.answer("✅ Подтверждено")
 
 
@@ -672,7 +697,8 @@ async def cb_order_cancel(call: CallbackQuery, repos: Repos, bot: Bot):
     except Exception:
         pass
 
-    await call.message.edit_text(call.message.text + f"\n\n❌ <b>Отменено {call.from_user.first_name}</b>")
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(call.message.text + f"\n\n❌ <b>Отменено {call.from_user.first_name}</b>")
     await call.answer("❌ Отменено")
 
 
@@ -700,11 +726,13 @@ async def cb_go_wishlist(call: CallbackQuery, repos: Repos):
     items = await repos.cart.wish_get(call.from_user.id)
 
     if not items:
-        await call.message.edit_text(t(lang, "wishlist_empty"))
+        with suppress(TelegramBadRequest):
+            await call.message.edit_text(t(lang, "wishlist_empty"))
         await call.answer()
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
-    await call.message.edit_text(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
     await call.answer()
 
 
@@ -742,11 +770,14 @@ async def cb_wish_remove(call: CallbackQuery, repos: Repos):
 
     items = await repos.cart.wish_get(call.from_user.id)
     if not items:
-        await call.message.edit_text(t(lang, "wishlist_empty"))
+        with suppress(TelegramBadRequest):
+            await call.message.edit_text(t(lang, "wishlist_empty"))
         await call.answer("🗑")
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
-    await call.message.edit_text(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
+    
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
     await call.answer("🗑")
 
 
@@ -784,47 +815,4 @@ async def msg_my_order(message: Message, repos: Repos):
 
     items = await repos.orders.get_items(order["id"])
     text = await _order_summary_text(repos, order, items, lang)
-
-    kb_rows = []
-    if order["status"] == "pending":
-        edit_btn = await tr(repos, "✏️ Изменить размер/адрес", lang)
-        cancel_btn = await tr(repos, "❌ Отменить заказ", lang)
-        kb_rows.append([InlineKeyboardButton(text=edit_btn, callback_data=f"myorder:edit:{order['id']}")])
-        kb_rows.append([InlineKeyboardButton(text=cancel_btn, callback_data=f"myorder:cancel:{order['id']}")])
-
-    if kb_rows:
-        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows))
-    else:
-        await message.answer(text)
-
-
-@router.message(ButtonText("btn_order_history"))
-async def msg_order_history(message: Message, repos: Repos):
-    user = await repos.users.get(message.from_user.id)
-    lang = user.get("language", "ru") if user else "ru"
-
-    orders = await repos.orders.history_for_user(message.from_user.id)
-    if not orders:
-        await message.answer(await tr(repos, "📭 У вас пока нет подтверждённых заказов.", lang))
-        return
-
-    from db.repo_orders import status_label
-
-    heading = await tr(repos, "📜 История заказов", lang)
-    lines = [f"📜 <b>{heading}</b>\n"]
-    reorder_btn_text = await tt(repos, lang, "btn_reorder")
-    kb_rows = []
-    for o in orders[:20]:
-        status_text = await tr(repos, status_label(o["status"]), lang)
-        lines.append(f"#{o['id']} — {status_text} ({str(o.get('created_at',''))[:10]})")
-        kb_rows.append([InlineKeyboardButton(
-            text=f"{reorder_btn_text} — #{o['id']}", callback_data=f"reorder:start:{o['id']}"
-        )])
-
-    text = "\n".join(lines)
-    if len(orders) > 20:
-        more_template = await tr(repos, "…и ещё COUNT", lang)
-        text += "\n\n" + more_template.replace("COUNT", str(len(orders) - 20))
-
-    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows) if kb_rows else None
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text, reply_markup=await kb_my_order(repos, lang, order["id"]))
