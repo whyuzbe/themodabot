@@ -22,7 +22,8 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
     while True:
         try:
             await asyncio.sleep(60)
-            expired_items = await repos.cart.clear_expired(minutes=45)
+            expired_items = await repos.cart.clear_expired(minutes="45")
+# или minutes="45 minutes", в зависимости от того, как написан твой SQL-запрос внутри функции clear_expired
 
             if expired_items:
                 logger.info(f"⏳ Снята бронь с {len(expired_items)} товаров в корзинах.")
