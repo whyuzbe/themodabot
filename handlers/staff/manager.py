@@ -187,6 +187,17 @@ async def cb_export(call: CallbackQuery, repos: Repos):
     await call.message.answer_document(BufferedInputFile(buf.read(), filename=filename), caption="📥 Отчёт готов!")
 
 
+# ── Тексты и баннер ──────────────────────────────────────────────────
+
+@router.callback_query(F.data == "mgr:texts")
+async def cb_texts(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await safe_edit(call.message, "✏️ Настройка текстов и баннеров находится в разработке.", reply_markup=kb_back_manager())
+    await call.answer()
+
+
 # ── Словарь красивых названий категорий ──────────────────────────────
 
 CATEGORY_LABELS_FLAT = {
@@ -648,7 +659,7 @@ async def cb_brand_del_confirm(call: CallbackQuery, repos: Repos, bot: Bot):
         try:
             await bot.delete_forum_topic(chat_id=channel["chat_id"], message_thread_id=brand["topic_id"])
         except Exception:
-            pass  # нет прав / топик уже удалён вручную — не критично, всё равно скрываем раздел в боте
+            pass
 
     await repos.brands.deactivate(brand_id)
     await call.message.answer(
@@ -658,7 +669,7 @@ async def cb_brand_del_confirm(call: CallbackQuery, repos: Repos, bot: Bot):
     await call.answer()
 
 
-# ── Создание/удаление стафф-аккаунтов ──────────────────────────────────
+# ── Создание, удаление и просмотр стафф-аккаунтов ─────────────────────
 
 def kb_role_select() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -676,6 +687,39 @@ def kb_delete_role_select() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🤝 Партнёр", callback_data="del_role:partner")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")],
     ])
+
+
+@router.callback_query(F.data == "mgr:list_accounts")
+async def cb_list_accounts(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    admins = await repos.staff.list_by_role("admin")
+    warehouse = await repos.staff.list_by_role("warehouse")
+    partners = await repos.staff.list_partners()
+
+    def format_list(items, is_partner=False):
+        if not items:
+            return "  — нет"
+        res = []
+        for it in items:
+            login = it.get("login")
+            if is_partner:
+                comm = it.get("commission_pct", 0)
+                res.append(f"  • <code>{login}</code> (комиссия: {comm}%)")
+            else:
+                res.append(f"  • <code>{login}</code>")
+        return "\n".join(res)
+
+    text = (
+        "👥 <b>Список аккаунтов сотрудников</b>\n\n"
+        f"🛠 <b>Администраторы:</b>\n{format_list(admins)}\n\n"
+        f"📦 <b>Склад:</b>\n{format_list(warehouse)}\n\n"
+        f"🤝 <b>Партнёры:</b>\n{format_list(partners, is_partner=True)}"
+    )
+    await safe_edit(call.message, text, reply_markup=kb_back_manager())
+    await call.answer()
 
 
 @router.callback_query(F.data == "mgr:delete_account")
@@ -761,5 +805,115 @@ async def cb_acc_role(call: CallbackQuery, state: FSMContext, repos: Repos):
     role = call.data.split(":")[1]
     await state.update_data(new_role=role)
     await state.set_state(ManagerStates.create_login)
-    await safe_edit(call.message, f"➕ Создание аккаунта ({role})\n\nВведите логин:")
+    await safe_edit(call.message, f"➕ Создание аккаунта ({role})\n\nВведите логин для нового пользователя:")
     await call.answer()
+
+
+@router.message(ManagerStates.create_login)
+async def msg_create_login(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    login = message.text.strip()
+    if not login:
+        await message.answer("⚠️ Логин не может быть пустым. Введите логин:")
+        return
+
+    await state.update_data(new_login=login)
+    await state.set_state(ManagerStates.create_password)
+    await message.answer("Введите пароль для нового аккаунта:")
+
+
+@router.message(ManagerStates.create_password)
+async def msg_create_password(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    password = message.text.strip()
+    if not password:
+        await message.answer("⚠️ Пароль не может быть пустым. Введите пароль:")
+        return
+
+    await state.update_data(new_password=password)
+    data = await state.get_data()
+    role = data.get("new_role")
+
+    # Если создаем партнера, запрашиваем процент комиссии, иначе завершаем создание
+    if role == "partner":
+        await state.set_state(ManagerStates.create_commission)
+        await message.answer("Введите процент комиссии для партнера (например, 10 или 15.5):")
+    else:
+        await finalize_account_creation(message, state, repos, commission=0)
+
+
+@router.message(ManagerStates.create_commission)
+async def msg_create_commission(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    try:
+        commission = float(message.text.strip().replace(",", "."))
+    except ValueError:
+        await message.answer("⚠️ Введите корректное число для комиссии (например 10):")
+        return
+
+    await finalize_account_creation(message, state, repos, commission=commission)
+
+
+async def finalize_account_creation(message: Message, state: FSMContext, repos: Repos, commission: float):
+    data = await state.get_data()
+    role = data.get("new_role")
+    login = data.get("new_login")
+    password = data.get("new_password")
+    await state.clear()
+
+    try:
+        if role == "partner":
+            await repos.staff.create_partner(login=login, password=password, commission_pct=commission)
+        else:
+            await repos.staff.create_account(role=role, login=login, password=password)
+        
+        await message.answer(
+            f"✅ <b>Аккаунт успешно создан!</b>\n\n"
+            f"Роль: <b>{role}</b>\n"
+            f"Логин: <code>{login}</code>\n"
+            f"Пароль: <code>{password}</code>"
+            + (f"\nКомиссия: {commission}%" if role == "partner" else ""),
+            reply_markup=kb_manager(),
+        )
+    except Exception as e:
+        await message.answer(
+            f"❌ Ошибка при создании аккаунта (возможно, такой логин уже занят):\n<code>{e}</code>",
+            reply_markup=kb_manager(),
+        )
+
+
+# ── Смена собственного пароля менеджера ───────────────────────────────
+
+@router.callback_query(F.data == "mgr:change_my_password")
+async def cb_change_my_password(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await state.set_state(ManagerStates.change_my_password)
+    await safe_edit(call.message, "🔑 <b>Смена пароля</b>\n\nВведите новый пароль для своего аккаунта менеджера:", reply_markup=kb_back_manager())
+    await call.answer()
+
+
+@router.message(ManagerStates.change_my_password)
+async def msg_change_my_password(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    new_pwd = message.text.strip()
+    if not new_pwd:
+        await message.answer("⚠️ Пароль не может быть пустым. Введите новый пароль:")
+        return
+
+    await repos.staff.update_password("manager", "manager", new_pwd)  # или через сессию
+    await state.clear()
+    await message.answer("✅ Ваш пароль успешно изменён!", reply_markup=kb_manager())
