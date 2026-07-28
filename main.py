@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from redis.asyncio import Redis
 
 # Конфигурация
@@ -34,7 +36,7 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
                                 "Товар из вашей корзины вернулся в общий каталог, так как время ожидания (45 мин) завершилось.\n\n"
                                 "💡 <i>Вы всегда можете повторно добавить его из каталога или Избранного!</i>"
                             ),
-                            parse_mode="HTML",
+                            # parse_mode="HTML" теперь можно даже не писать здесь, он будет глобальным
                         )
                     except Exception as e:
                         logger.warning(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
@@ -46,7 +48,11 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
 
 
 async def main():
-    bot = Bot(token=BOT_TOKEN)
+    # ИСПРАВЛЕНИЕ: Добавляем глобальный parse_mode для HTML
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
 
     # Подключение к базе данных и Redis
