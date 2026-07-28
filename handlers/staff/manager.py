@@ -187,16 +187,7 @@ async def cb_export(call: CallbackQuery, repos: Repos):
     await call.message.answer_document(BufferedInputFile(buf.read(), filename=filename), caption="📥 Отчёт готов!")
 
 
-# ── Каналы (муж/жен) ────────────────────────────────────────────────
-
-def kb_channels_menu() -> InlineKeyboardMarkup:
-    rows = []
-    for gender in ("male", "female"):
-        for key, label in CATEGORIES[gender].items():
-            rows.append([InlineKeyboardButton(text=label, callback_data=f"mgr:channel_set:{gender}:{key}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
+# ── Словарь красивых названий категорий ──────────────────────────────
 
 CATEGORY_LABELS_FLAT = {
     ("male", "clothes"): "👔 Муж. одежда", ("male", "shoes"): "👟 Муж. обувь",
@@ -204,6 +195,19 @@ CATEGORY_LABELS_FLAT = {
     ("female", "clothes"): "👗 Жен. одежда", ("female", "shoes"): "👠 Жен. обувь",
     ("female", "accessories"): "💍 Жен. аксессуары", ("female", "bags"): "👜 Жен. сумки",
 }
+
+
+# ── Каналы (муж/жен) ────────────────────────────────────────────────
+
+def kb_channels_menu() -> InlineKeyboardMarkup:
+    rows = []
+    for gender in ("male", "female"):
+        categories_list = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+        for key in categories_list:
+            label = CATEGORY_LABELS_FLAT.get((gender, key), key)
+            rows.append([InlineKeyboardButton(text=label, callback_data=f"mgr:channel_set:{gender}:{key}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.callback_query(F.data == "mgr:overview")
@@ -219,9 +223,10 @@ async def cb_overview(call: CallbackQuery, repos: Repos):
     lines = ["👁 <b>Каналы и разделы</b>\n"]
 
     for gender in ("male", "female"):
-        for key, label in CATEGORIES[gender].items():
+        categories_list = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+        for key in categories_list:
             ch = by_key.get((gender, key))
-            cat_label = CATEGORY_LABELS_FLAT.get((gender, key), label)
+            cat_label = CATEGORY_LABELS_FLAT.get((gender, key), key)
             lines.append(f"\n<b>{cat_label}</b>")
             if ch:
                 lines.append(f"  📡 {ch['chat_id']}")
@@ -353,11 +358,13 @@ async def cb_channels(call: CallbackQuery, repos: Repos):
 
     lines = []
     for gender in ("male", "female"):
-        for key, label in CATEGORIES[gender].items():
+        categories_list = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+        for key in categories_list:
             c = by_key.get((gender, key))
+            label = CATEGORY_LABELS_FLAT.get((gender, key), key)
             lines.append(f"{label}: {c['chat_id'] if c else '—'}")
 
-    text = "📡 <b>Каналы (7 шт — пол × категория)</b>\n\n" + "\n".join(lines)
+    text = "📡 <b>Каналы (пол × категория)</b>\n\n" + "\n".join(lines)
     await safe_edit(call.message, text, reply_markup=kb_channels_menu())
     await call.answer()
 
@@ -370,7 +377,7 @@ async def cb_channel_set(call: CallbackQuery, state: FSMContext, repos: Repos):
     _, _, gender, category = call.data.split(":")
     await state.update_data(channel_gender=gender, channel_category=category)
     await state.set_state(ManagerStates.channel_chat_id)
-    label = CATEGORIES[gender][category]
+    label = CATEGORY_LABELS_FLAT.get((gender, category), category)
     await safe_edit(call.message,
         f"Настройка канала: <b>{label}</b>\n\n"
         "Введите ID или username супергруппы:\n"
@@ -425,8 +432,9 @@ def kb_brand_gender() -> InlineKeyboardMarkup:
 
 
 def kb_brand_category(gender: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"brand_cat:{gender}:{key}")]
-            for key, label in CATEGORIES[gender].items()]
+    categories_list = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+    rows = [[InlineKeyboardButton(text=CATEGORY_LABELS_FLAT.get((gender, key), key), callback_data=f"brand_cat:{gender}:{key}")]
+            for key in categories_list]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:brands")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -504,7 +512,7 @@ async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos, bot
 
     channel = await repos.brands.get_channel(gender, category)
     if not channel:
-        cat_label = CATEGORIES.get(gender, {}).get(category, "")
+        cat_label = CATEGORY_LABELS_FLAT.get((gender, category), category)
         await message.answer(
             f"❌ Для раздела «{cat_label}» сначала нужно настроить канал.\n"
             "Зайди в «📡 Каналы» и укажи chat_id + ссылку для этой категории, потом повтори создание раздела.",
@@ -530,7 +538,7 @@ async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos, bot
         name=name, emoji=emoji, gender=gender, category=category,
         topic_id=topic.message_thread_id,
     )
-    cat_label = CATEGORIES.get(gender, {}).get(category, "")
+    cat_label = CATEGORY_LABELS_FLAT.get((gender, category), category)
     await message.answer(
         f"✅ <b>Раздел создан, топик в группе создан автоматически!</b>\n\n"
         f"{emoji} <b>{name}</b>\n📂 {cat_label}\n🆔 topic_id: {topic.message_thread_id}",
@@ -549,8 +557,9 @@ def kb_brand_del_gender() -> InlineKeyboardMarkup:
 
 
 def kb_brand_del_category(gender: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"brand_delc:{gender}:{key}")]
-            for key, label in CATEGORIES[gender].items()]
+    categories_list = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+    rows = [[InlineKeyboardButton(text=CATEGORY_LABELS_FLAT.get((gender, key), key), callback_data=f"brand_delc:{gender}:{key}")]
+            for key in categories_list]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="brand_del_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -754,273 +763,3 @@ async def cb_acc_role(call: CallbackQuery, state: FSMContext, repos: Repos):
     await state.set_state(ManagerStates.create_login)
     await safe_edit(call.message, f"➕ Создание аккаунта ({role})\n\nВведите логин:")
     await call.answer()
-
-
-@router.message(ManagerStates.create_login)
-async def msg_create_login(message: Message, state: FSMContext, repos: Repos):
-    if not await require_role(message.from_user.id, repos, "manager"):
-        await state.clear()
-        return
-    login = message.text.strip()
-    if len(login) < 3:
-        await message.answer("⚠️ Логин минимум 3 символа:")
-        return
-    await state.update_data(new_login=login)
-    await state.set_state(ManagerStates.create_password)
-    await message.answer("Придумайте пароль (минимум 4 символа):")
-
-
-@router.message(ManagerStates.create_password)
-async def msg_create_password(message: Message, state: FSMContext, repos: Repos):
-    if not await require_role(message.from_user.id, repos, "manager"):
-        await state.clear()
-        return
-
-    data = await state.get_data()
-    role = data.get("new_role")
-    login = data.get("new_login")
-    password = message.text.strip()
-
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    if len(password) < 4:
-        await message.answer("⚠️ Пароль слишком короткий:")
-        return
-
-    if role == "partner":
-        await state.update_data(new_password=password)
-        await state.set_state(ManagerStates.create_commission)
-        await message.answer("Введите процент комиссии партнёра (например 7 или 7.5):")
-        return
-
-    ok = await repos.staff.create_account(role, login, password)
-    await state.clear()
-
-    if ok:
-        await message.answer(
-            f"✅ <b>Аккаунт создан!</b>\n👤 {login} ({role})\nВход: /{role}",
-            reply_markup=kb_manager(),
-        )
-    else:
-        await message.answer(f"❌ Логин <code>{login}</code> занят.", reply_markup=kb_manager())
-
-
-@router.message(ManagerStates.create_commission)
-async def msg_create_commission(message: Message, state: FSMContext, repos: Repos):
-    if not await require_role(message.from_user.id, repos, "manager"):
-        await state.clear()
-        return
-
-    try:
-        commission_pct = float(message.text.strip().replace(",", "."))
-        if commission_pct < 0 or commission_pct > 100:
-            raise ValueError
-    except ValueError:
-        await message.answer("⚠️ Введите число от 0 до 100 (например 7 или 7.5):")
-        return
-
-    data = await state.get_data()
-    login = data.get("new_login")
-    password = data.get("new_password")
-    await state.clear()
-
-    ref_code = await repos.staff.create_partner_account(login, password, commission_pct)
-
-    if ref_code:
-        bot_me = await message.bot.get_me()
-        link = f"https://t.me/{bot_me.username}?start=ref_{ref_code}"
-        await message.answer(
-            f"✅ <b>Партнёр создан!</b>\n👤 {login}\n📈 Комиссия: {commission_pct}%\n"
-            f"🔗 Ссылка: <code>{link}</code>\n\nВход партнёра: /partner",
-            reply_markup=kb_manager(),
-        )
-    else:
-        await message.answer(f"❌ Логин <code>{login}</code> занят.", reply_markup=kb_manager())
-
-
-@router.callback_query(F.data == "mgr:change_my_password")
-async def cb_change_my_password(call: CallbackQuery, state: FSMContext, repos: Repos):
-    session = await require_role(call.from_user.id, repos, "manager")
-    if not session:
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-    await state.set_state(ManagerStates.change_my_password)
-    await safe_edit(
-        call.message,
-        f"🔑 <b>Смена пароля</b>\n\nВы вошли как <code>{session['login']}</code>.\n"
-        "Введите новый пароль (минимум 4 символа):",
-        reply_markup=kb_back_manager(),
-    )
-    await call.answer()
-
-
-@router.message(ManagerStates.change_my_password)
-async def msg_change_my_password(message: Message, state: FSMContext, repos: Repos):
-    session = await require_role(message.from_user.id, repos, "manager")
-    if not session:
-        await state.clear()
-        return
-
-    new_password = message.text.strip()
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    if len(new_password) < 4:
-        await message.answer("⚠️ Пароль слишком короткий, минимум 4 символа. Попробуйте снова:")
-        return
-
-    ok = await repos.staff.change_password("manager", session["login"], new_password)
-    await state.clear()
-
-    if ok:
-        await message.answer("✅ Пароль успешно изменён!", reply_markup=kb_manager())
-    else:
-        await message.answer("❌ Не удалось изменить пароль.", reply_markup=kb_manager())
-
-
-@router.callback_query(F.data == "mgr:list_accounts")
-async def cb_list_accounts(call: CallbackQuery, repos: Repos):
-    if not await require_role(call.from_user.id, repos, "manager"):
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-
-    admins = await repos.staff.list_by_role("admin")
-    wh = await repos.staff.list_by_role("warehouse")
-    partners = await repos.staff.list_partners()
-
-    lines = ["<b>🛠 Админы:</b>"]
-    lines += [f"  • {a['login']} {'🟢' if a['is_online'] else '⚪️'}" for a in admins] or ["  —"]
-    lines.append("\n<b>📦 Склад:</b>")
-    lines += [f"  • {w['login']} {'🟢' if w['is_online'] else '⚪️'}" for w in wh] or ["  —"]
-    lines.append("\n<b>🤝 Партнёры:</b>")
-    lines += [
-        f"  • {p['login']} {'🟢' if p['is_online'] else '⚪️'} | {p['commission_pct']}%"
-        for p in partners
-    ] or ["  —"]
-
-    await safe_edit(call.message, "\n".join(lines), reply_markup=kb_back_manager())
-    await call.answer()
-
-
-# ── Тексты и баннер ────────────────────────────────────────────────────
-
-TEXT_LABELS = {
-    "text_welcome_ru": "👋 Приветствие (RU)",
-    "text_welcome_en": "👋 Приветствие (EN)",
-    "text_welcome_uk": "👋 Приветствие (UK)",
-    "text_welcome_es": "👋 Приветствие (ES)",
-    "text_opening_ru": "🏠 Опенинг каталога (RU)",
-    "text_opening_en": "🏠 Опенинг каталога (EN)",
-    "text_opening_uk": "🏠 Опенинг каталога (UK)",
-    "text_opening_es": "🏠 Опенинг каталога (ES)",
-    "text_support_ru": "💬 Текст поддержки (RU)",
-    "text_support_en": "💬 Текст поддержки (EN)",
-    "text_support_uk": "💬 Текст поддержки (UK)",
-    "text_support_es": "💬 Текст поддержки (ES)",
-}
-
-
-def kb_texts_menu() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"mgr:edit:{key}")] for key, label in TEXT_LABELS.items()]
-    rows.append([InlineKeyboardButton(text="🖼 Баннер", callback_data="mgr:banner")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def kb_text_actions(key: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Изменить", callback_data=f"mgr:do_edit:{key}")],
-        [InlineKeyboardButton(text="🔄 Сбросить", callback_data=f"mgr:reset:{key}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:texts")],
-    ])
-
-
-@router.callback_query(F.data == "mgr:texts")
-async def cb_texts_menu(call: CallbackQuery, state: FSMContext, repos: Repos):
-    if not await require_role(call.from_user.id, repos, "manager"):
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-    await state.clear()
-    await safe_edit(call.message, "✏️ <b>Тексты и баннер</b>", reply_markup=kb_texts_menu())
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("mgr:edit:"))
-async def cb_text_view(call: CallbackQuery, repos: Repos):
-    if not await require_role(call.from_user.id, repos, "manager"):
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-    key = call.data.split("mgr:edit:")[1]
-    current = await repos.texts.get(key)
-    preview = current[:800] + ("..." if len(current) > 800 else "")
-    await safe_edit(call.message,
-        f"📄 <b>{TEXT_LABELS.get(key, key)}</b>\n\n<blockquote>{preview}</blockquote>",
-        reply_markup=kb_text_actions(key),
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("mgr:do_edit:"))
-async def cb_text_start_edit(call: CallbackQuery, state: FSMContext, repos: Repos):
-    if not await require_role(call.from_user.id, repos, "manager"):
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-    key = call.data.split("mgr:do_edit:")[1]
-    await state.set_state(ManagerStates.editing_text)
-    await state.update_data(editing_key=key)
-    await safe_edit(call.message, f"✏️ Отправьте новый текст для «{TEXT_LABELS.get(key,key)}»:")
-    await call.answer()
-
-
-@router.message(ManagerStates.editing_text)
-async def msg_text_save(message: Message, state: FSMContext, repos: Repos):
-    if not await require_role(message.from_user.id, repos, "manager"):
-        await state.clear()
-        return
-    data = await state.get_data()
-    key = data.get("editing_key")
-    new_text = message.text or message.caption or ""
-    if not new_text.strip():
-        await message.answer("⚠️ Текст не может быть пустым:")
-        return
-    await repos.texts.set(key, new_text)
-    await state.clear()
-    await message.answer("✅ Обновлено!", reply_markup=kb_texts_menu())
-
-
-@router.callback_query(F.data.startswith("mgr:reset:"))
-async def cb_text_reset(call: CallbackQuery, repos: Repos):
-    if not await require_role(call.from_user.id, repos, "manager"):
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-    key = call.data.split("mgr:reset:")[1]
-    await repos.texts.reset(key)
-    await call.answer("✅ Сброшено!", show_alert=True)
-
-
-@router.callback_query(F.data == "mgr:banner")
-async def cb_banner(call: CallbackQuery, state: FSMContext, repos: Repos):
-    if not await require_role(call.from_user.id, repos, "manager"):
-        await call.answer("❌ Сессия истекла", show_alert=True)
-        return
-    current = await repos.settings.get("banner_file_id")
-    status = "✅ Загружен" if current else "❌ Не загружен"
-    await state.set_state(ManagerStates.editing_text)
-    await state.update_data(editing_key="__banner__")
-    await safe_edit(call.message, f"🖼 <b>Баннер</b>\nСтатус: {status}\n\nОтправьте новое фото:")
-    await call.answer()
-
-
-@router.message(ManagerStates.editing_text, F.photo)
-async def msg_banner_upload(message: Message, state: FSMContext, repos: Repos):
-    data = await state.get_data()
-    if data.get("editing_key") != "__banner__":
-        return
-    await repos.settings.set("banner_file_id", message.photo[-1].file_id)
-    await state.clear()
-    await message.answer_photo(message.photo[-1].file_id, caption="✅ Баннер обновлён!", reply_markup=kb_manager())
