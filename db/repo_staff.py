@@ -24,7 +24,9 @@ class StaffRepo:
         try:
             await self.db.execute(
                 "INSERT INTO staff_accounts (role, login, password_hash) VALUES ($1,$2,$3)",
-                role, login, hash_password(password),
+                role,
+                login,
+                hash_password(password),
             )
             return True
         except Exception:
@@ -33,49 +35,62 @@ class StaffRepo:
     async def change_password(self, role: str, login: str, new_password: str) -> bool:
         result = await self.db.execute(
             "UPDATE staff_accounts SET password_hash=$1 WHERE role=$2 AND login=$3",
-            hash_password(new_password), role, login,
+            hash_password(new_password),
+            role,
+            login,
         )
         return result > 0
 
     async def delete_account(self, role: str, login: str) -> bool:
         result = await self.db.execute(
-            "DELETE FROM staff_accounts WHERE role=$1 AND login=$2", role, login
+            "DELETE FROM staff_accounts WHERE role=$1 AND login=$2",
+            role,
+            login,
         )
         return result > 0
 
     async def verify(self, role: str, login: str, password: str) -> dict | None:
         row = await self.db.fetchrow(
-            "SELECT * FROM staff_accounts WHERE role=$1 AND login=$2", role, login
+            "SELECT * FROM staff_accounts WHERE role=$1 AND login=$2",
+            role,
+            login,
         )
-        
-        # ВРЕМЕННЫЙ ОБХОД ДЛЯ МЕНЕДЖЕРА: пускает при совпадении логина
-        if role == "manager":
-            if row:
-                return dict(row)
-            return {"role": "manager", "login": login}
 
-        if not row or not check_password(password, row["password_hash"]):
+        if row is None:
             return None
+
+        if not check_password(password, row["password_hash"]):
+            return None
+
         return dict(row)
 
     async def bind_tg(self, role: str, login: str, tg_id: int):
         await self.db.execute(
             "UPDATE staff_accounts SET tg_id=$1, is_online=TRUE WHERE role=$2 AND login=$3",
-            tg_id, role, login,
+            tg_id,
+            role,
+            login,
         )
 
     async def set_online(self, tg_id: int, online: bool):
         await self.db.execute(
-            "UPDATE staff_accounts SET is_online=$1 WHERE tg_id=$2", online, tg_id
+            "UPDATE staff_accounts SET is_online=$1 WHERE tg_id=$2",
+            online,
+            tg_id,
         )
 
     async def get_by_tg(self, tg_id: int) -> dict | None:
-        row = await self.db.fetchrow("SELECT * FROM staff_accounts WHERE tg_id=$1", tg_id)
+        row = await self.db.fetchrow(
+            "SELECT * FROM staff_accounts WHERE tg_id=$1",
+            tg_id,
+        )
         return dict(row) if row else None
 
     async def get_account(self, role: str, login: str) -> dict | None:
         row = await self.db.fetchrow(
-            "SELECT * FROM staff_accounts WHERE role=$1 AND login=$2", role, login
+            "SELECT * FROM staff_accounts WHERE role=$1 AND login=$2",
+            role,
+            login,
         )
         return dict(row) if row else None
 
@@ -94,27 +109,47 @@ class StaffRepo:
         return [r["tg_id"] for r in rows]
 
     async def count(self, role: str) -> int:
-        return await self.db.fetchval(
-            "SELECT COUNT(*) FROM staff_accounts WHERE role=$1", role
-        ) or 0
+        return (
+            await self.db.fetchval(
+                "SELECT COUNT(*) FROM staff_accounts WHERE role=$1",
+                role,
+            )
+            or 0
+        )
 
     # ── партнёрская программа ─────────────────────────────────
 
-    async def create_partner_account(self, login: str, password: str, commission_pct: float) -> str | None:
+    async def create_partner_account(
+        self,
+        login: str,
+        password: str,
+        commission_pct: float,
+    ) -> str | None:
         import secrets
+
         ref_code = secrets.token_urlsafe(8)
+
         try:
             await self.db.execute(
-                """INSERT INTO staff_accounts (role, login, password_hash, ref_code, commission_pct)
-                    VALUES ('partner',$1,$2,$3,$4)""",
-                login, hash_password(password), ref_code, commission_pct,
+                """
+                INSERT INTO staff_accounts
+                (role, login, password_hash, ref_code, commission_pct)
+                VALUES ('partner', $1, $2, $3, $4)
+                """,
+                login,
+                hash_password(password),
+                ref_code,
+                commission_pct,
             )
             return ref_code
         except Exception:
             return None
 
     async def get_by_ref_code(self, ref_code: str) -> dict | None:
-        row = await self.db.fetchrow("SELECT * FROM staff_accounts WHERE ref_code=$1", ref_code)
+        row = await self.db.fetchrow(
+            "SELECT * FROM staff_accounts WHERE ref_code=$1",
+            ref_code,
+        )
         return dict(row) if row else None
 
     async def list_partners(self) -> list[dict]:
@@ -126,22 +161,48 @@ class StaffRepo:
 
     # ── сессии (8 часов) ─────────────────────────────────────
 
-    async def create_session(self, tg_id: int, role: str, login: str, hours: int = 8):
-        expires = (datetime.now() + timedelta(hours=hours)).isoformat(sep=" ", timespec="seconds")
+    async def create_session(
+        self,
+        tg_id: int,
+        role: str,
+        login: str,
+        hours: int = 8,
+    ):
+        expires = (
+            datetime.now() + timedelta(hours=hours)
+        ).isoformat(sep=" ", timespec="seconds")
+
         await self.db.execute(
-            """INSERT INTO staff_sessions (tg_id, role, login, expires_at)
-                VALUES ($1,$2,$3,$4)
-                ON CONFLICT (tg_id) DO UPDATE SET role=$2, login=$3, expires_at=$4""",
-            tg_id, role, login, expires,
+            """
+            INSERT INTO staff_sessions (tg_id, role, login, expires_at)
+            VALUES ($1,$2,$3,$4)
+            ON CONFLICT (tg_id)
+            DO UPDATE SET role=$2, login=$3, expires_at=$4
+            """,
+            tg_id,
+            role,
+            login,
+            expires,
         )
 
     async def get_session(self, tg_id: int) -> dict | None:
-        now_str = datetime.now().isoformat(sep=" ", timespec="seconds")
-        row = await self.db.fetchrow(
-            "SELECT * FROM staff_sessions WHERE tg_id=$1 AND expires_at > $2", tg_id, now_str
+        now_str = datetime.now().isoformat(
+            sep=" ",
+            timespec="seconds",
         )
+
+        row = await self.db.fetchrow(
+            "SELECT * FROM staff_sessions WHERE tg_id=$1 AND expires_at>$2",
+            tg_id,
+            now_str,
+        )
+
         return dict(row) if row else None
 
     async def delete_session(self, tg_id: int):
-        await self.db.execute("DELETE FROM staff_sessions WHERE tg_id=$1", tg_id)
+        await self.db.execute(
+            "DELETE FROM staff_sessions WHERE tg_id=$1",
+            tg_id,
+        )
+
         await self.set_online(tg_id, False)
