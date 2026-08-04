@@ -11,6 +11,8 @@ router = Router()
 
 ROLE_COMMANDS = {"manager": "manager", "admin": "admin", "warehouse": "warehouse"}
 
+BOOTSTRAP_SYNC_FLAG = "bootstrap_manager_synced"
+
 
 class AuthStates(StatesGroup):
     waiting_login = State()
@@ -18,12 +20,35 @@ class AuthStates(StatesGroup):
 
 
 async def ensure_bootstrap_manager(repos: Repos):
-    """Создаёт менеджера из .env при первом запуске, если аккаунтов ещё нет."""
-    count = await repos.staff.count("manager")
-    if count == 0:
-        await repos.staff.create_account(
-            "manager", config.BOOTSTRAP_MANAGER_LOGIN, config.BOOTSTRAP_MANAGER_PASSWORD
-        )
+    """
+    Гарантирует, что аккаунт manager/<пароль из .env> реально доступен для входа.
+
+    ИСПРАВЛЕНИЕ: раньше проверялось только "есть ли вообще хоть один менеджер"
+    (count == 0), из-за чего если в базе уже был аккаунт manager с каким-то
+    другим/непонятным паролем — .env-пароль никогда не подхватывался.
+
+    Теперь: при первом запуске ПОСЛЕ этого фикса пароль аккаунта manager
+    принудительно синхронизируется со значением из .env (создаём аккаунт,
+    если его нет вовсе, либо сбрасываем пароль, если он уже существовал).
+    Это происходит РОВНО ОДИН РАЗ — флаг bootstrap_manager_synced в settings
+    защищает от повторного сброса, чтобы пароль, который потом сменят
+    вручную через "🔑 Сменить пароль" в панели менеджера, не затирался
+    при следующих рестартах бота.
+    """
+    already_synced = await repos.settings.get(BOOTSTRAP_SYNC_FLAG)
+    if already_synced:
+        return
+
+    login = config.BOOTSTRAP_MANAGER_LOGIN
+    password = config.BOOTSTRAP_MANAGER_PASSWORD
+
+    account = await repos.staff.get_account("manager", login)
+    if account is None:
+        await repos.staff.create_account("manager", login, password)
+    else:
+        await repos.staff.change_password("manager", login, password)
+
+    await repos.settings.set(BOOTSTRAP_SYNC_FLAG, "true")
 
 
 async def require_role(tg_id: int, repos: Repos, role: str) -> dict | None:
