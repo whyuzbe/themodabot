@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from config import BOT_TOKEN, REDIS_URL, DATABASE_URL, DB_DRIVER
 from db.pool import DB
 from db.repos import Repos
+from handlers.staff.auth import ensure_bootstrap_manager
 
 # Импортируем главный роутер со всеми подключенными хэндлерами
 from handlers import router as main_router
@@ -23,7 +24,7 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
         try:
             await asyncio.sleep(60)
             expired_items = await repos.cart.clear_expired(minutes="45")
-# или minutes="45 minutes", в зависимости от того, как написан твой SQL-запрос внутри функции clear_expired
+            # или minutes="45 minutes", в зависимости от того, как написан твой SQL-запрос внутри функции clear_expired
 
             if expired_items:
                 logger.info(f"⏳ Снята бронь с {len(expired_items)} товаров в корзинах.")
@@ -37,7 +38,6 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
                                 "Товар из вашей корзины вернулся в общий каталог, так как время ожидания (45 мин) завершилось.\n\n"
                                 "💡 <i>Вы всегда можете повторно добавить его из каталога или Избранного!</i>"
                             ),
-                            # parse_mode="HTML" теперь можно даже не писать здесь, он будет глобальным
                         )
                     except Exception as e:
                         logger.warning(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
@@ -49,7 +49,17 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
 
 
 async def main():
-    # ИСПРАВЛЕНИЕ: Добавляем глобальный parse_mode для HTML
+    # ВРЕМЕННАЯ ДИАГНОСТИКА: показываем в логах длину токена и первые/последние
+    # символы, чтобы понять, действительно ли процесс видит тот токен, что в Railway.
+    # Полный токен в лог не пишем из соображений безопасности.
+    if BOT_TOKEN:
+        logger.info(
+            f"🔍 DEBUG BOT_TOKEN: len={len(BOT_TOKEN)} "
+            f"start={BOT_TOKEN[:12]!r} end={BOT_TOKEN[-6:]!r}"
+        )
+    else:
+        logger.info("🔍 DEBUG BOT_TOKEN: пусто/None")
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -62,6 +72,12 @@ async def main():
 
     redis = Redis.from_url(REDIS_URL) if REDIS_URL else None
     repos = Repos(db, redis=redis)
+
+    # ИСПРАВЛЕНИЕ: создаём стартовый аккаунт manager/<пароль из .env>,
+    # если в staff_accounts ещё нет ни одного менеджера.
+    # Без этого вызова аккаунт из BOOTSTRAP_MANAGER_LOGIN/PASSWORD
+    # никогда не появляется в базе.
+    await ensure_bootstrap_manager(repos)
 
     # Прокидываем зависимости в контекст диспетчера
     dp["repos"] = repos
