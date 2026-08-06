@@ -49,6 +49,22 @@ async def kb_main_menu(repos, lang: str) -> ReplyKeyboardMarkup:
     )
 
 
+# ИСПРАВЛЕНИЕ: соответствие (пол, ключ категории из config.CATEGORIES) -> ключ
+# перевода в locales/texts.py. Раньше названия категорий были захардкожены
+# на русском в словаре names_map прямо в этом файле и не зависели от языка
+# пользователя вообще. Теперь текст всегда идёт через tt().
+CATEGORY_TEXT_KEYS = {
+    ("male", "Одежда"): "btn_men_clothes",
+    ("male", "Обувь"): "btn_men_shoes",
+    ("male", "Аксессуары"): "btn_men_accessories",
+    ("male", "Сумки"): "btn_men_bags",
+    ("female", "Одежда"): "btn_women_clothes",
+    ("female", "Обувь"): "btn_women_shoes",
+    ("female", "Аксессуары"): "btn_women_accessories",
+    ("female", "Сумки"): "btn_women_bags",
+}
+
+
 async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | None], show_other: bool = False) -> InlineKeyboardMarkup:
     # Если show_other == True, значит мы смотрим противоположный каталог
     current_gender = ("female" if gender == "male" else "male") if show_other else gender
@@ -59,41 +75,27 @@ async def kb_categories(repos, lang: str, gender: str, urls: dict[str, str | Non
     else:
         category_keys = cats
 
-    # ИСПРАВЛЕНИЕ: Жесткая и надежная структура для разных полов
-    names_map = {
-        "male": {
-            "Одежда": "🧥 Мужская одежда",
-            "Обувь": "👟 Мужская обувь",
-            "Аксессуары": "🕶 Мужские аксессуары",
-            "Сумки": "💼 Мужские сумки",
-        },
-        "female": {
-            "Одежда": "👗 Женская одежда",
-            "Обувь": "👠 Женская обувь",
-            "Аксессуары": "💍 Женские аксессуары",
-            "Сумки": "👜 Женские сумки",
-        }
-    }
-
-    current_names = names_map.get(current_gender, {})
-
     rows = []
     for key in category_keys:
-        text = current_names.get(key, f"📦 {key}")
+        text_key = CATEGORY_TEXT_KEYS.get((current_gender, key))
+        text = await tt(repos, lang, text_key) if text_key else f"📦 {key}"
         url = urls.get(key)
         if url:
             rows.append([InlineKeyboardButton(text=text, url=url)])
         else:
             rows.append([InlineKeyboardButton(text=text, callback_data=f"cat_no_channel:{current_gender}:{key}")])
 
-    # ИСПРАВЛЕНИЕ: Логика кнопки возврата и перехода
+    # Логика кнопки возврата и перехода — тоже через переводы
     if show_other:
-        # Если мы в чужом каталоге, возвращаем домой с однозначным callback
-        rows.append([InlineKeyboardButton(text="🔙 В свой каталог", callback_data="cat_switch:home")])
+        # Если мы в чужом каталоге, возвращаем домой (в каталог родного пола пользователя)
+        home_key = "btn_my_catalog_m" if gender == "male" else "btn_my_catalog_f"
+        home_text = await tt(repos, lang, home_key)
+        rows.append([InlineKeyboardButton(text=home_text, callback_data="cat_switch:home")])
     else:
         # Если мы в своем каталоге, предлагаем посмотреть противоположный
         opposite = "female" if gender == "male" else "male"
-        other_text = "👗 Женский каталог" if gender == "male" else "👔 Мужской каталог"
+        other_key = "btn_other_gender_f" if gender == "male" else "btn_other_gender_m"
+        other_text = await tt(repos, lang, other_key)
         rows.append([InlineKeyboardButton(text=other_text, callback_data=f"cat_switch:{opposite}")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
