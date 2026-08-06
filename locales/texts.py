@@ -95,6 +95,17 @@ TEXTS = {
         "account_delete_failed": "❌ Не удалось удалить аккаунт.",
         "account_delete_cancelled": "Отменено. Аккаунт не удалён.",
         "account_not_found": "ℹ️ У вас ещё нет аккаунта в боте.",
+        "saved_size_prompt": "📏 У вас сохранён размер для этой категории: <b>{size}</b>\nИспользовать его или указать другой?",
+        "btn_use_this_size": "✅ Использовать {size}",
+        "btn_specify_other": "✏️ Указать другой",
+        "saved_address_prompt": "💬 Ваш сохранённый адрес/город:\n<i>{address}</i>\n\nИспользовать его или указать другой?",
+        "btn_use_this_address": "✅ Использовать этот",
+        "order_created_success": "🎉 <b>Заказ #{order_id} успешно сформирован!</b>\n\n📦 <b>Состав заказа:</b>\n{items}\n\n📏 <b>Размер:</b> {size}\n📍 <b>Адрес / Город:</b> {address}\n{eta}\n\n<i>Менеджер уже обрабатывает ваш заказ и свяжется с вами для уточнения оплаты!</i>",
+        "shipping_estimate_days": "🚀 Примерный срок доставки из Китая: {days} дней",
+        "order_data_updated": "✅ Спасибо, данные обновлены! Передаём администратору.",
+        "order_confirmed_thanks": "✅ Спасибо, заказ подтверждён! Передаём администратору.",
+        "order_not_found": "❌ Заказ не найден",
+        "order_edit_hint": "Если заметили ошибку в деталях заказа — вы можете исправить или отменить его ниже:",
     },
     "en": {
         "choose_gender": "✨ To find the perfect pieces for you, tell us your gender:",
@@ -192,6 +203,17 @@ TEXTS = {
         "account_delete_failed": "❌ Failed to delete the account.",
         "account_delete_cancelled": "Cancelled. Your account was not deleted.",
         "account_not_found": "ℹ️ You don't have an account in the bot yet.",
+        "saved_size_prompt": "📏 You have a saved size for this category: <b>{size}</b>\nUse it or enter a different one?",
+        "btn_use_this_size": "✅ Use {size}",
+        "btn_specify_other": "✏️ Enter another",
+        "saved_address_prompt": "💬 Your saved address/city:\n<i>{address}</i>\n\nUse it or enter a different one?",
+        "btn_use_this_address": "✅ Use this one",
+        "order_created_success": "🎉 <b>Order #{order_id} placed successfully!</b>\n\n📦 <b>Order contents:</b>\n{items}\n\n📏 <b>Size:</b> {size}\n📍 <b>Address / City:</b> {address}\n{eta}\n\n<i>Our manager is already processing your order and will contact you to confirm payment!</i>",
+        "shipping_estimate_days": "🚀 Estimated delivery time from China: {days} days",
+        "order_data_updated": "✅ Thanks, your details have been updated! Passing it to the manager.",
+        "order_confirmed_thanks": "✅ Thank you, order confirmed! Passing it to the manager.",
+        "order_not_found": "❌ Order not found",
+        "order_edit_hint": "If you notice a mistake in the order details — you can fix or cancel it below:",
     },
     "uk": {
         "choose_gender": "✨ Щоб підібрати ідеальні речі саме для вас, вкажіть вашу статю:",
@@ -289,6 +311,17 @@ TEXTS = {
         "account_delete_failed": "❌ Не вдалося видалити акаунт.",
         "account_delete_cancelled": "Скасовано. Акаунт не видалено.",
         "account_not_found": "ℹ️ У вас ще немає акаунта в боті.",
+        "saved_size_prompt": "📏 У вас збережений розмір для цієї категорії: <b>{size}</b>\nВикористати його чи вказати інший?",
+        "btn_use_this_size": "✅ Використати {size}",
+        "btn_specify_other": "✏️ Вказати інший",
+        "saved_address_prompt": "💬 Ваша збережена адреса/місто:\n<i>{address}</i>\n\nВикористати її чи вказати іншу?",
+        "btn_use_this_address": "✅ Використати цю",
+        "order_created_success": "🎉 <b>Замовлення #{order_id} успішно оформлено!</b>\n\n📦 <b>Склад замовлення:</b>\n{items}\n\n📏 <b>Розмір:</b> {size}\n📍 <b>Адреса / Місто:</b> {address}\n{eta}\n\n<i>Менеджер вже опрацьовує ваше замовлення і зв'яжеться з вами для уточнення оплати!</i>",
+        "shipping_estimate_days": "🚀 Орієнтовний термін доставки з Китаю: {days} днів",
+        "order_data_updated": "✅ Дякуємо, дані оновлено! Передаємо адміністратору.",
+        "order_confirmed_thanks": "✅ Дякуємо, замовлення підтверджено! Передаємо адміністратору.",
+        "order_not_found": "❌ Замовлення не знайдено",
+        "order_edit_hint": "Якщо помітили помилку в деталях замовлення — ви можете виправити або скасувати його нижче:",
     },
     "es": {
         "choose_gender": "✨ Para encontrar las mejores prendas para ti, indícanos tu sexo:",
@@ -386,6 +419,17 @@ TEXTS = {
         "account_delete_failed": "❌ No se pudo eliminar la cuenta.",
         "account_delete_cancelled": "Cancelado. La cuenta no se eliminó.",
         "account_not_found": "ℹ️ Todavía no tienes una cuenta en el bot.",
+        "saved_size_prompt": "📏 Tienes una talla guardada para esta categoría: <b>{size}</b>\n¿Usarla o indicar otra?",
+        "btn_use_this_size": "✅ Usar {size}",
+        "btn_specify_other": "✏️ Indicar otra",
+        "saved_address_prompt": "💬 Tu dirección/ciudad guardada:\n<i>{address}</i>\n\n¿Usarla o indicar otra?",
+        "btn_use_this_address": "✅ Usar esta",
+        "order_created_success": "🎉 <b>¡Pedido #{order_id} creado con éxito!</b>\n\n📦 <b>Contenido del pedido:</b>\n{items}\n\n📏 <b>Talla:</b> {size}\n📍 <b>Dirección / Ciudad:</b> {address}\n{eta}\n\n<i>Nuestro gestor ya está procesando tu pedido y se pondrá en contacto contigo para confirmar el pago!</i>",
+        "shipping_estimate_days": "🚀 Tiempo estimado de entrega desde China: {days} días",
+        "order_data_updated": "✅ ¡Gracias, tus datos han sido actualizados! Se lo pasamos al gestor.",
+        "order_confirmed_thanks": "✅ ¡Gracias, pedido confirmado! Se lo pasamos al gestor.",
+        "order_not_found": "❌ Pedido no encontrado",
+        "order_edit_hint": "Si notas un error en los detalles del pedido, puedes corregirlo o cancelarlo abajo:",
     },
 }
 
@@ -403,16 +447,28 @@ def all_lang_texts(key: str) -> list[str]:
     return [TEXTS[lang][key] for lang in TEXTS if key in TEXTS[lang]]
 
 
-async def tt(repos, lang: str, key: str) -> str:
+async def tt(repos, lang: str, key: str, **kwargs) -> str:
     """
     Асинхронный аналог t() — работает для ЛЮБОГО языка, не только для 4 "быстрых"
     (ru/en/uk/es), которые переведены статически. Если lang входит в число
     статических — берём готовый перевод мгновенно, без сети. Если это какой-то
     другой язык (например zh, fr, de — определённый автоматически по номеру
     телефона) — переводим русский оригинал на лету через tr() (с кэшированием).
+
+    ИСПРАВЛЕНИЕ: добавлена поддержка **kwargs для подстановки переменных
+    (например {order_id}, {size}), как в t() — раньше tt() их не поддерживала,
+    из-за чего часть текстов с переменными (например итог заказа) оставались
+    захардкожены на русском прямо в коде хендлеров, а не в словаре переводов.
     """
     if lang in TEXTS:
-        return TEXTS[lang].get(key, TEXTS["ru"].get(key, key))
-    from translate import tr
-    source = TEXTS["ru"].get(key, key)
-    return await tr(repos, source, lang)
+        text = TEXTS[lang].get(key, TEXTS["ru"].get(key, key))
+    else:
+        from translate import tr
+        source = TEXTS["ru"].get(key, key)
+        text = await tr(repos, source, lang)
+    if kwargs:
+        try:
+            text = text.format(**kwargs)
+        except Exception:
+            pass
+    return text
