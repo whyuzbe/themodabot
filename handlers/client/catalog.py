@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery, Message
 
 from db.repos import Repos
 from keyboards.client_kb import kb_categories
+from locales.texts import tt
 
 # Объявляем router, чтобы main и __init__.py его видели
 router = Router()
@@ -33,10 +34,10 @@ async def cb_category_no_channel(call: CallbackQuery, repos: Repos):
     (invite_url) в таблице gender_channels — сообщаем пользователю,
     вместо того чтобы кнопка молча "проглатывала" нажатие.
     """
-    await call.answer(
-        "🚧 Этот раздел пока не готов, загляните позже!",
-        show_alert=True,
-    )
+    user = await repos.users.get(call.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+    text = await tt(repos, lang, "channel_not_ready")
+    await call.answer(text, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("cat_switch:"))
@@ -64,7 +65,7 @@ async def cb_switch_catalog(call: CallbackQuery, repos: Repos):
 
     urls = await _category_urls(repos, active_gender)
     keyboard = await kb_categories(repos, lang, user_gender, urls, show_other=show_other)
-    text = "🛍 Выберите интересующую вас категорию:"
+    text = await tt(repos, lang, "choose_category")
 
     try:
         await call.message.edit_text(text=text, reply_markup=keyboard)
