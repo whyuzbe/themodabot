@@ -8,7 +8,6 @@ from db.repos import Repos
 from locales.texts import t, tt
 from keyboards.client_kb import kb_language, kb_gender, kb_categories
 from utils import client_menu_kb, with_warehouse_button
-from translate import tr
 
 router = Router()
 
@@ -175,18 +174,14 @@ async def cmd_dell_num(message: Message, repos: Repos):
     lang = user.get("language", "ru") if user else "ru"
 
     if not user:
-        await message.answer(await tr(repos, "ℹ️ У вас ещё нет аккаунта в боте.", lang))
+        # ИСПРАВЛЕНИЕ: раньше tr() с захардкоженным русским текстом —
+        # теперь готовый ключ из TEXTS (мгновенно, без обращения к сети).
+        await message.answer(await tt(repos, lang, "account_not_found"))
         return
 
-    text = await tr(
-        repos,
-        "⚠️ Вы уверены, что хотите удалить свой аккаунт?\n\n"
-        "Будут стёрты: ваш профиль, корзина, сохранённые товары и сохранённые размеры.\n"
-        "Это действие нельзя отменить.",
-        lang,
-    )
-    yes_btn = await tr(repos, "✅ Да, удалить", lang)
-    no_btn = await tr(repos, "❌ Отмена", lang)
+    text = await tt(repos, lang, "confirm_delete_account")
+    yes_btn = await tt(repos, lang, "btn_delete_yes")
+    no_btn = await tt(repos, lang, "btn_delete_no")
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text=yes_btn, callback_data="dell_num:confirm"),
         InlineKeyboardButton(text=no_btn, callback_data="dell_num:cancel"),
@@ -198,7 +193,7 @@ async def cmd_dell_num(message: Message, repos: Repos):
 async def cb_dell_num_cancel(call: CallbackQuery, repos: Repos):
     user = await repos.users.get(call.from_user.id)
     lang = user.get("language", "ru") if user else "ru"
-    await call.message.edit_text(await tr(repos, "Отменено. Аккаунт не удалён.", lang))
+    await call.message.edit_text(await tt(repos, lang, "account_delete_cancelled"))
     await call.answer()
 
 
@@ -210,16 +205,12 @@ async def cb_dell_num_confirm(call: CallbackQuery, repos: Repos):
     deleted = await repos.users.delete_account(call.from_user.id)
 
     if deleted:
-        msg = await tr(
-            repos,
-            "✅ Ваш аккаунт удалён. Чтобы начать заново, отправьте /start.",
-            lang,
-        )
+        msg = await tt(repos, lang, "account_deleted")
         await call.message.edit_text(msg)
         try:
             await call.message.answer("👋", reply_markup=ReplyKeyboardRemove())
         except Exception:
             pass
     else:
-        await call.message.edit_text(await tr(repos, "❌ Не удалось удалить аккаунт.", lang))
+        await call.message.edit_text(await tt(repos, lang, "account_delete_failed"))
     await call.answer()
