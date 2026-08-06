@@ -53,23 +53,28 @@ def _get_cart_timer_info(items: list[dict]) -> str:
     return f"\n⏳ <i>Бронь на товары в корзине действительна: <b>~{remaining} мин</b></i>\n"
 
 
-def _estimate_shipping_time(location_text: str) -> str:
+def _estimate_shipping_days(location_text: str) -> str:
+    """
+    ИСПРАВЛЕНИЕ: раньше возвращала готовую фразу целиком на русском
+    ("🚀 Примерный срок доставки из Китая: X дней") независимо от языка
+    пользователя. Теперь возвращает только диапазон дней — сама фраза
+    собирается через tt(..., "shipping_estimate_days", days=...) на нужном языке.
+    """
     loc = location_text.lower()
-    # Расчет ориентировочных сроков доставки из Китая
     if any(k in loc for k in ["ташкент", "узбекистан", "uzb", "uzbekistan"]):
-        return "🚀 Примерный срок доставки из Китая: 7–12 дней"
+        return "7–12"
     elif any(k in loc for k in ["москва", "спб", "питер", "россия", "rf", "ru", "russia"]):
-        return "🚀 Примерный срок доставки из Китая: 10–18 дней"
+        return "10–18"
     elif any(k in loc for k in ["казахстан", "алматы", "астана", "kz"]):
-        return "🚀 Примерный срок доставки из Китая: 8–14 дней"
+        return "8–14"
     else:
-        return "🚀 Примерный срок доставки из Китая: 10–20 дней"
+        return "10–20"
 
 
-def kb_reuse_or_manual(reuse_label: str, reuse_cb: str, manual_cb: str) -> InlineKeyboardMarkup:
+def kb_reuse_or_manual(reuse_label: str, reuse_cb: str, manual_label: str, manual_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"✅ {reuse_label}", callback_data=reuse_cb)],
-        [InlineKeyboardButton(text="✏️ Указать другой", callback_data=manual_cb)],
+        [InlineKeyboardButton(text=reuse_label, callback_data=reuse_cb)],
+        [InlineKeyboardButton(text=manual_label, callback_data=manual_cb)],
     ])
 
 
@@ -280,11 +285,10 @@ async def _proceed_to_size(target, state: FSMContext, repos: Repos, items: list[
     saved_size = await repos.users.get_size(user_tg_id, category) if category else None
 
     if saved_size:
-        text = (
-            f"📏 У вас сохранён размер для этой категории: <b>{saved_size}</b>\n"
-            "Использовать его или указать другой?"
-        )
-        kb = kb_reuse_or_manual(f"Использовать {saved_size}", "checkout:size:saved", "checkout:size:manual")
+        text = await tt(repos, lang, "saved_size_prompt", size=saved_size)
+        reuse_label = await tt(repos, lang, "btn_use_this_size", size=saved_size)
+        manual_label = await tt(repos, lang, "btn_specify_other")
+        kb = kb_reuse_or_manual(reuse_label, "checkout:size:saved", manual_label, "checkout:size:manual")
         if edit:
             with suppress(TelegramBadRequest):
                 await target.edit_text(text, reply_markup=kb)
@@ -328,10 +332,14 @@ async def msg_size(message: Message, state: FSMContext, repos: Repos):
 
 async def _ask_comment_step(target, state: FSMContext, repos: Repos, user_tg_id: int, edit: bool):
     last_address = await repos.users.get_last_address(user_tg_id)
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
 
     if last_address:
-        text = f"💬 Ваш сохранённый адрес/город:\n<i>{last_address}</i>\n\nИспользовать его или указать другой?"
-        kb = kb_reuse_or_manual("Использовать этот", "checkout:comment:saved", "checkout:comment:manual")
+        text = await tt(repos, lang, "saved_address_prompt", address=last_address)
+        reuse_label = await tt(repos, lang, "btn_use_this_address")
+        manual_label = await tt(repos, lang, "btn_specify_other")
+        kb = kb_reuse_or_manual(reuse_label, "checkout:comment:saved", manual_label, "checkout:comment:manual")
         if edit:
             with suppress(TelegramBadRequest):
                 await target.edit_text(text, reply_markup=kb)
@@ -339,8 +347,6 @@ async def _ask_comment_step(target, state: FSMContext, repos: Repos, user_tg_id:
             await target.answer(text, reply_markup=kb)
     else:
         await state.set_state(CartStates.waiting_comment)
-        data = await state.get_data()
-        lang = data.get("lang", "ru")
         if edit:
             with suppress(TelegramBadRequest):
                 await target.edit_text(t(lang, "ask_comment"))
@@ -381,8 +387,9 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
     category = data.get("checkout_category")
     await state.clear()
 
-    # Динамический расчет времени доставки относительно Китая
-    eta_text = _estimate_shipping_time(comment)
+    # ИСПРАВЛЕНИЕ: срок доставки теперь переводится на язык клиента
+    shipping_days = _estimate_shipping_days(comment)
+    eta_text = await tt(repos, lang, "shipping_estimate_days", days=shipping_days)
 
     items_for_order = [
         {"post_id": it["post_id"], "title": it.get("title"), "price": it.get("price"),
@@ -395,13 +402,11 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
         await repos.users.set_size(user_tg_id, category, size)
     await repos.users.set_last_address(user_tg_id, comment)
 
-    text = (
-        f"🎉 <b>Заказ #{order_id} успешно сформирован!</b>\n\n"
-        f"📦 <b>Состав заказа:</b>\n{_cart_lines(items)}\n\n"
-        f"📏 <b>Размер:</b> {size}\n"
-        f"📍 <b>Адрес / Город:</b> {comment}\n"
-        f"{eta_text}\n\n"
-        f"<i>Менеджер уже обрабатывает ваш заказ и свяжется с вами для уточнения оплаты!</i>"
+    # ИСПРАВЛЕНИЕ: главный текст подтверждения заказа раньше был захардкожен
+    # на русском независимо от языка клиента — теперь идёт через tt().
+    text = await tt(
+        repos, lang, "order_created_success",
+        order_id=order_id, items=_cart_lines(items), size=size, address=comment, eta=eta_text,
     )
 
     main_kb = await client_menu_kb(repos, user_tg_id, lang)
@@ -413,11 +418,7 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
         await target.answer(text, reply_markup=main_kb)
 
     # Дополнительный блок для быстрой отмены/редактирования клиентом
-    edit_hint = await tr(
-        repos,
-        "Если заметили ошибку в деталях заказа — вы можете исправить или отменить его ниже:",
-        lang,
-    )
+    edit_hint = await tt(repos, lang, "order_edit_hint")
     try:
         await bot.send_message(user_tg_id, edit_hint, reply_markup=await kb_my_order(repos, lang, order_id))
     except Exception:
@@ -425,7 +426,7 @@ async def _finalize_order(target, state: FSMContext, repos: Repos, bot: Bot, use
 
     await repos.cart.clear(user_tg_id)
 
-    # Уведомление администратора
+    # Уведомление администратора (остаётся на русском — это внутренняя панель персонала)
     user = await repos.users.get(user_tg_id)
     username = f"@{user.get('username')}" if user and user.get("username") else f"ID {user_tg_id}"
     phone = user.get("phone", "—") if user else "—"
@@ -490,13 +491,18 @@ async def cb_order_verify(call: CallbackQuery, repos: Repos, bot: Bot):
 async def cb_client_verify_ok(call: CallbackQuery, repos: Repos, bot: Bot):
     order_id = int(call.data.split(":")[2])
     order = await repos.orders.get(order_id)
+    user = await repos.users.get(call.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+
     if not order:
-        await call.answer("Заказ не найден", show_alert=True)
+        # ИСПРАВЛЕНИЕ: этот алерт видит клиент — раньше был захардкожен на русском
+        await call.answer(await tt(repos, lang, "order_not_found"), show_alert=True)
         return
 
     await repos.orders.set_client_verified(order_id, True)
     with suppress(TelegramBadRequest):
-        await call.message.edit_text("✅ Спасибо, заказ подтверждён! Передаём администратору.")
+        # ИСПРАВЛЕНИЕ: клиентский текст, раньше захардкожен на русском
+        await call.message.edit_text(await tt(repos, lang, "order_confirmed_thanks"))
     await call.answer()
 
     online_ids = await repos.staff.online_ids("admin")
@@ -605,13 +611,15 @@ async def msg_fix_comment(message: Message, state: FSMContext, repos: Repos, bot
     order_id = data.get("fixing_order_id")
     new_size = data.get("fix_size", "—")
     new_comment = message.text.strip()
+    lang = data.get("lang", "ru")
     await state.clear()
 
     await repos.orders.update_details(order_id, size=new_size, comment=new_comment)
     await repos.orders.set_client_verified(order_id, True)
     await repos.users.set_last_address(message.from_user.id, new_comment)
 
-    await message.answer("✅ Спасибо, данные обновлены! Передаём администратору.")
+    # ИСПРАВЛЕНИЕ: клиентский текст, раньше захардкожен на русском
+    await message.answer(await tt(repos, lang, "order_data_updated"))
 
     online_ids = await repos.staff.online_ids("admin")
     items = await repos.orders.get_items(order_id)
