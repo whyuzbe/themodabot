@@ -106,6 +106,7 @@ TEXTS = {
         "order_confirmed_thanks": "✅ Спасибо, заказ подтверждён! Передаём администратору.",
         "order_not_found": "❌ Заказ не найден",
         "order_edit_hint": "Если заметили ошибку в деталях заказа — вы можете исправить или отменить его ниже:",
+        "support_default_text": "💬 Опишите ваш вопрос, и мы поможем как можно скорее!",
     },
     "en": {
         "choose_gender": "✨ To find the perfect pieces for you, tell us your gender:",
@@ -214,6 +215,7 @@ TEXTS = {
         "order_confirmed_thanks": "✅ Thank you, order confirmed! Passing it to the manager.",
         "order_not_found": "❌ Order not found",
         "order_edit_hint": "If you notice a mistake in the order details — you can fix or cancel it below:",
+        "support_default_text": "💬 Describe your question and we'll help as soon as possible!",
     },
     "uk": {
         "choose_gender": "✨ Щоб підібрати ідеальні речі саме для вас, вкажіть вашу статю:",
@@ -322,6 +324,7 @@ TEXTS = {
         "order_confirmed_thanks": "✅ Дякуємо, замовлення підтверджено! Передаємо адміністратору.",
         "order_not_found": "❌ Замовлення не знайдено",
         "order_edit_hint": "Якщо помітили помилку в деталях замовлення — ви можете виправити або скасувати його нижче:",
+        "support_default_text": "💬 Опишіть ваше питання, і ми допоможемо якнайшвидше!",
     },
     "es": {
         "choose_gender": "✨ Para encontrar las mejores prendas para ti, indícanos tu sexo:",
@@ -430,6 +433,7 @@ TEXTS = {
         "order_confirmed_thanks": "✅ ¡Gracias, pedido confirmado! Se lo pasamos al gestor.",
         "order_not_found": "❌ Pedido no encontrado",
         "order_edit_hint": "Si notas un error en los detalles del pedido, puedes corregirlo o cancelarlo abajo:",
+        "support_default_text": "💬 Describe tu pregunta y te ayudaremos lo antes posible!",
     },
 }
 
