@@ -50,6 +50,7 @@ class ManagerStates(StatesGroup):
     change_my_password = State()
     delete_login = State()
     editing_text = State()
+    waiting_banner = State()
     channel_gender = State()
     channel_chat_id = State()
     channel_invite_url = State()
@@ -190,12 +191,187 @@ async def cb_export(call: CallbackQuery, repos: Repos):
 # ── Тексты и баннер ──────────────────────────────────────────────────
 
 @router.callback_query(F.data == "mgr:texts")
-async def cb_texts(call: CallbackQuery, repos: Repos):
+async def cb_texts(call: CallbackQuery, state: FSMContext, repos: Repos):
     if not await require_role(call.from_user.id, repos, "manager"):
         await call.answer("❌ Сессия истекла", show_alert=True)
         return
-    await safe_edit(call.message, "✏️ Настройка текстов и баннеров находится в разработке.", reply_markup=kb_back_manager())
+    await state.clear()
+    await safe_edit(
+        call.message,
+        "✏️ <b>Тексты и баннер</b>\n\nВыберите, что хотите изменить:",
+        reply_markup=kb_texts_menu(),
+    )
     await call.answer()
+
+
+# ── Тексты и баннер ────────────────────────────────────────────────
+
+TEXT_TYPE_LABELS = {
+    "welcome": "👋 Приветствие (/start)",
+    "opening": "🛍 Текст каталога",
+    "support": "💬 Текст поддержки",
+}
+LANG_LABELS = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "uk": "🇺🇦 Українська", "es": "🇪🇸 Español"}
+
+
+def kb_texts_menu() -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"mgr:texts:type:{t}")] for t, label in TEXT_TYPE_LABELS.items()]
+    rows.append([InlineKeyboardButton(text="🖼 Баннер каталога", callback_data="mgr:texts:banner")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_texts_lang_pick(text_type: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=label, callback_data=f"mgr:texts:pick:{text_type}:{code}")] for code, label in LANG_LABELS.items()]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:texts")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def kb_text_edit_actions(text_type: str, lang: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Сбросить на дефолт", callback_data=f"mgr:texts:reset:{text_type}:{lang}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"mgr:texts:type:{text_type}")],
+    ])
+
+
+@router.callback_query(F.data.startswith("mgr:texts:type:"))
+async def cb_texts_type(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    text_type = call.data.split(":")[3]
+    label = TEXT_TYPE_LABELS.get(text_type, text_type)
+    await safe_edit(
+        call.message,
+        f"{label}\n\nНа каком языке меняем текст?",
+        reply_markup=kb_texts_lang_pick(text_type),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("mgr:texts:pick:"))
+async def cb_texts_pick(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    _, _, _, text_type, lang = call.data.split(":")
+    text_key = f"text_{text_type}_{lang}"
+    current = await repos.texts.get(text_key)
+
+    await state.set_state(ManagerStates.editing_text)
+    await state.update_data(text_key=text_key, text_type=text_type, text_lang=lang)
+
+    label = TEXT_TYPE_LABELS.get(text_type, text_type)
+    await safe_edit(
+        call.message,
+        f"{label} — {LANG_LABELS.get(lang, lang)}\n\n"
+        f"<b>Текущий текст:</b>\n{current}\n\n"
+        "✍️ Пришлите новый текст (можно использовать HTML-теги вроде &lt;b&gt;, &lt;i&gt;), "
+        "или нажмите «Сбросить на дефолт» ниже:",
+        reply_markup=kb_text_edit_actions(text_type, lang),
+    )
+    await call.answer()
+
+
+@router.message(ManagerStates.editing_text)
+async def msg_edit_text(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    text_key = data.get("text_key")
+    text_type = data.get("text_type")
+    lang = data.get("text_lang")
+    if not text_key:
+        await state.clear()
+        return
+
+    new_text = message.text or message.html_text
+    if not new_text:
+        await message.answer("⚠️ Пришлите именно текстовое сообщение.")
+        return
+
+    await repos.texts.set(text_key, new_text)
+    await state.clear()
+
+    label = TEXT_TYPE_LABELS.get(text_type, text_type)
+    await message.answer(
+        f"✅ Текст «{label}» ({LANG_LABELS.get(lang, lang)}) обновлён!",
+        reply_markup=kb_manager(),
+    )
+
+
+@router.callback_query(F.data.startswith("mgr:texts:reset:"))
+async def cb_texts_reset(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    _, _, _, text_type, lang = call.data.split(":")
+    text_key = f"text_{text_type}_{lang}"
+    await repos.texts.reset(text_key)
+
+    default_text = await repos.texts.get(text_key)
+    label = TEXT_TYPE_LABELS.get(text_type, text_type)
+    await safe_edit(
+        call.message,
+        f"✅ Текст «{label}» ({LANG_LABELS.get(lang, lang)}) сброшен на дефолт:\n\n{default_text}",
+        reply_markup=kb_text_edit_actions(text_type, lang),
+    )
+    await call.answer("Сброшено")
+
+
+@router.callback_query(F.data == "mgr:texts:banner")
+async def cb_texts_banner(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    current_banner = await repos.settings.get("settings_banner_file_id")
+    await state.set_state(ManagerStates.waiting_banner)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Убрать баннер", callback_data="mgr:texts:banner:reset")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mgr:texts")],
+    ])
+    caption = "🖼 <b>Баннер каталога</b>\n\nПришлите новое фото-баннер (просто отправьте картинку сюда)."
+    if current_banner:
+        try:
+            await call.message.answer_photo(current_banner, caption=caption + "\n\nВыше — текущий баннер.", reply_markup=kb)
+            await call.answer()
+            return
+        except Exception:
+            pass
+    await safe_edit(call.message, caption, reply_markup=kb)
+    await call.answer()
+
+
+@router.message(ManagerStates.waiting_banner, F.photo)
+async def msg_banner_photo(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    file_id = message.photo[-1].file_id
+    await repos.settings.set("settings_banner_file_id", file_id)
+    await state.clear()
+    await message.answer("✅ Баннер обновлён!", reply_markup=kb_manager())
+
+
+@router.message(ManagerStates.waiting_banner)
+async def msg_banner_invalid(message: Message):
+    await message.answer("⚠️ Пришлите именно фото (как изображение, не файлом).")
+
+
+@router.callback_query(F.data == "mgr:texts:banner:reset")
+async def cb_texts_banner_reset(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+    await repos.settings.set("settings_banner_file_id", "")
+    await state.clear()
+    await call.answer("✅ Баннер убран", show_alert=True)
+    await call.message.answer("✅ Баннер убран — теперь показывается просто текст без картинки.", reply_markup=kb_manager())
 
 
 # ── Словарь красивых названий категорий ──────────────────────────────
@@ -872,21 +1048,37 @@ async def finalize_account_creation(message: Message, state: FSMContext, repos: 
 
     try:
         if role == "partner":
-            await repos.staff.create_partner(login=login, password=password, commission_pct=commission)
+            # ИСПРАВЛЕНИЕ: метод называется create_partner_account, а не create_partner.
+            # Он возвращает ref_code (или None при ошибке/занятом логине), а не bool.
+            ref_code = await repos.staff.create_partner_account(
+                login=login, password=password, commission_pct=commission
+            )
+            if not ref_code:
+                raise ValueError("не удалось создать партнёрский аккаунт (возможно, логин занят)")
+
+            await message.answer(
+                f"✅ <b>Партнёрский аккаунт успешно создан!</b>\n\n"
+                f"Логин: <code>{login}</code>\n"
+                f"Пароль: <code>{password}</code>\n"
+                f"Комиссия: {commission}%\n"
+                f"Реф-код: <code>{ref_code}</code>",
+                reply_markup=kb_manager(),
+            )
         else:
-            await repos.staff.create_account(role=role, login=login, password=password)
-        
-        await message.answer(
-            f"✅ <b>Аккаунт успешно создан!</b>\n\n"
-            f"Роль: <b>{role}</b>\n"
-            f"Логин: <code>{login}</code>\n"
-            f"Пароль: <code>{password}</code>"
-            + (f"\nКомиссия: {commission}%" if role == "partner" else ""),
-            reply_markup=kb_manager(),
-        )
+            ok = await repos.staff.create_account(role=role, login=login, password=password)
+            if not ok:
+                raise ValueError("не удалось создать аккаунт (возможно, логин занят)")
+
+            await message.answer(
+                f"✅ <b>Аккаунт успешно создан!</b>\n\n"
+                f"Роль: <b>{role}</b>\n"
+                f"Логин: <code>{login}</code>\n"
+                f"Пароль: <code>{password}</code>",
+                reply_markup=kb_manager(),
+            )
     except Exception as e:
         await message.answer(
-            f"❌ Ошибка при создании аккаунта (возможно, такой логин уже занят):\n<code>{e}</code>",
+            f"❌ Ошибка при создании аккаунта: <code>{e}</code>",
             reply_markup=kb_manager(),
         )
 
@@ -905,7 +1097,8 @@ async def cb_change_my_password(call: CallbackQuery, state: FSMContext, repos: R
 
 @router.message(ManagerStates.change_my_password)
 async def msg_change_my_password(message: Message, state: FSMContext, repos: Repos):
-    if not await require_role(message.from_user.id, repos, "manager"):
+    session = await require_role(message.from_user.id, repos, "manager")
+    if not session:
         await state.clear()
         return
 
@@ -914,6 +1107,14 @@ async def msg_change_my_password(message: Message, state: FSMContext, repos: Rep
         await message.answer("⚠️ Пароль не может быть пустым. Введите новый пароль:")
         return
 
-    await repos.staff.update_password("manager", "manager", new_pwd)  # или через сессию
+    # ИСПРАВЛЕНИЕ: repos.staff.update_password не существует — правильный метод
+    # называется change_password. Логин берём из активной сессии, а не хардкодим
+    # "manager", чтобы работало для любого менеджера, а не только для дефолтного
+    # бутстрап-аккаунта.
+    ok = await repos.staff.change_password("manager", session["login"], new_pwd)
     await state.clear()
-    await message.answer("✅ Ваш пароль успешно изменён!", reply_markup=kb_manager())
+
+    if ok:
+        await message.answer("✅ Ваш пароль успешно изменён!", reply_markup=kb_manager())
+    else:
+        await message.answer("❌ Не удалось изменить пароль. Попробуйте ещё раз через меню.", reply_markup=kb_manager())
