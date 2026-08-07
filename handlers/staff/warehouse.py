@@ -47,6 +47,20 @@ class WarehouseReport(StatesGroup):
     asking_in_stock = State()
 
 
+# ИСПРАВЛЕНИЕ: единая карта подписей категорий с эмодзи (русские ключи, как в
+# config.CATEGORIES), используется и для "Новый фотоотчёт", и для "Управление
+# наличием" — раньше их не было, категории брались через CATEGORIES[gender].items().
+CATEGORY_LABELS = {
+    ("male", "Одежда"): "👔 Мужская одежда",
+    ("male", "Обувь"): "👟 Мужская обувь",
+    ("male", "Аксессуары"): "⌚️ Мужские аксессуары",
+    ("female", "Одежда"): "👗 Женская одежда",
+    ("female", "Обувь"): "👠 Женская обувь",
+    ("female", "Аксессуары"): "💍 Женские аксессуары",
+    ("female", "Сумки"): "👜 Женские сумки",
+}
+
+
 # ── Клавиатуры ────────────────────────────────────────────────────────
 
 def kb_warehouse_menu() -> InlineKeyboardMarkup:
@@ -88,8 +102,12 @@ def kb_whrep_gender() -> InlineKeyboardMarkup:
 
 
 def kb_whrep_category(gender: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"whrep:cat:{gender}:{key}")]
-            for key, label in CATEGORIES[gender].items()]
+    # ИСПРАВЛЕНИЕ: было CATEGORIES[gender].items() — но CATEGORIES[gender] это
+    # список строк, а не словарь, у списков нет .items(). Это гарантированно
+    # роняло "Новый фотоотчёт" сразу после выбора пола (AttributeError).
+    category_keys = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+    rows = [[InlineKeyboardButton(text=CATEGORY_LABELS.get((gender, key), key), callback_data=f"whrep:cat:{gender}:{key}")]
+            for key in category_keys]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="wh:new_report")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -123,8 +141,11 @@ def kb_stock_gender() -> InlineKeyboardMarkup:
 
 
 def kb_stock_category(gender: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"wh:stockcat:{gender}:{key}")]
-            for key, label in CATEGORIES[gender].items()]
+    # ИСПРАВЛЕНИЕ: тот же баг, что и в kb_whrep_category — CATEGORIES[gender].items()
+    # на списке. Роняло "Управление наличием" сразу после выбора пола.
+    category_keys = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+    rows = [[InlineKeyboardButton(text=CATEGORY_LABELS.get((gender, key), key), callback_data=f"wh:stockcat:{gender}:{key}")]
+            for key in category_keys]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="wh:stock")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -409,10 +430,10 @@ async def cb_whrep_instock(call: CallbackQuery, state: FSMContext, repos: Repos)
 
 
 _CATEGORY_LABELS_EN = {
-    ("male", "clothes"): "Men's Clothing", ("male", "shoes"): "Men's Shoes",
-    ("male", "accessories"): "Men's Accessories",
-    ("female", "clothes"): "Women's Clothing", ("female", "shoes"): "Women's Shoes",
-    ("female", "accessories"): "Women's Accessories", ("female", "bags"): "Women's Bags",
+    ("male", "Одежда"): "Men's Clothing", ("male", "Обувь"): "Men's Shoes",
+    ("male", "Аксессуары"): "Men's Accessories",
+    ("female", "Одежда"): "Women's Clothing", ("female", "Обувь"): "Women's Shoes",
+    ("female", "Аксессуары"): "Women's Accessories", ("female", "Сумки"): "Women's Bags",
 }
 
 
