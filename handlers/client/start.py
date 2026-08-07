@@ -8,6 +8,7 @@ from db.repos import Repos
 from locales.texts import t, tt
 from keyboards.client_kb import kb_language, kb_gender, kb_categories
 from utils import client_menu_kb, with_warehouse_button
+from filters import ButtonText
 
 router = Router()
 
@@ -52,6 +53,20 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
     except Exception:
         clean_text = opening_text.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
         await message.answer(clean_text, reply_markup=kb)
+
+
+@router.message(ButtonText("btn_catalog"))
+async def msg_catalog(message: Message, repos: Repos):
+    """
+    ИСПРАВЛЕНИЕ: кнопка "🛍 Каталог" в главном меню (kb_main_menu) раньше
+    вообще не имела обработчика — ни в этом файле, ни в catalog.py. Нажатие
+    просто ничего не делало. Теперь открывает каталог так же, как это
+    происходит после регистрации.
+    """
+    user = await repos.users.get(message.from_user.id)
+    if not user:
+        return
+    await show_catalog_entry(message, user, repos)
 
 
 @router.message(CommandStart())
