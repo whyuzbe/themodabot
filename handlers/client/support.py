@@ -105,6 +105,11 @@ async def msg_support_open(message: Message, state: FSMContext, repos: Repos):
         return
 
     support_text = await repos.texts.get(f"text_support_{lang}")
+    if not support_text:
+        # ИСПРАВЛЕНИЕ: раньше здесь мог быть None (раздел "Тексты и баннер"
+        # в панели менеджера — пока заглушка), а message.answer(None) падает
+        # с исключением. Теперь есть переведённый запасной текст.
+        support_text = await tt(repos, lang, "support_default_text")
     await state.set_state(SupportStates.waiting_question)
     await state.update_data(lang=lang)
     await message.answer(support_text)
