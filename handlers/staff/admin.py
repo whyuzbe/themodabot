@@ -17,32 +17,43 @@ router = Router()
 # ── Шаблоны постов по типу товара (публикуются в каналы — ТОЛЬКО на английском) ──
 # Ключ: (gender, category). Для каждого — свой заголовок/эмодзи/CTA, чтобы пост не
 # выглядел сухим шаблоном, а был "живым" и продающим.
+#
+# ИСПРАВЛЕНИЕ: ключи категорий здесь были на английском ("clothes"/"shoes"/...),
+# а реальные категории в проекте — на русском (см. config.CATEGORIES:
+# "Одежда"/"Обувь"/"Аксессуары"/"Сумки"). Из-за несовпадения POST_TEMPLATES.get()
+# никогда не находил нужный шаблон и всегда падал на generic-заглушку.
+# Также добавлен отсутствовавший шаблон для мужских сумок (категория "Сумки"
+# есть и у мужского, и у женского пола в config.CATEGORIES).
 POST_TEMPLATES = {
-    ("male", "clothes"): {
+    ("male", "Одежда"): {
         "emoji": "👔", "heading": "NEW MEN'S ARRIVAL",
         "cta": "🔥 Fresh fit, limited pieces — don't sleep on it!",
     },
-    ("male", "shoes"): {
+    ("male", "Обувь"): {
         "emoji": "👟", "heading": "FRESH KICKS JUST DROPPED",
         "cta": "🔥 Grab your size before they're gone!",
     },
-    ("male", "accessories"): {
+    ("male", "Аксессуары"): {
         "emoji": "⌚️", "heading": "NEW ACCESSORY DROP",
         "cta": "✨ The detail that finishes the look — get it now!",
     },
-    ("female", "clothes"): {
+    ("male", "Сумки"): {
+        "emoji": "🎒", "heading": "NEW BAG JUST LANDED",
+        "cta": "🔥 Only a few in stock — secure yours now!",
+    },
+    ("female", "Одежда"): {
         "emoji": "👗", "heading": "NEW WOMEN'S ARRIVAL",
         "cta": "🔥 Stunning piece, very limited quantity!",
     },
-    ("female", "shoes"): {
+    ("female", "Обувь"): {
         "emoji": "👠", "heading": "NEW HEELS IN STOCK",
         "cta": "🔥 Step up your style — order before it sells out!",
     },
-    ("female", "accessories"): {
+    ("female", "Аксессуары"): {
         "emoji": "💍", "heading": "NEW ACCESSORY DROP",
         "cta": "✨ The perfect finishing touch — yours today!",
     },
-    ("female", "bags"): {
+    ("female", "Сумки"): {
         "emoji": "👜", "heading": "NEW BAG JUST LANDED",
         "cta": "🔥 Only a few in stock — secure yours now!",
     },
@@ -88,9 +99,32 @@ def kb_gender_post() -> InlineKeyboardMarkup:
     ])
 
 
+# ИСПРАВЛЕНИЕ: раньше был доступ CATEGORIES[gender].items() — но CATEGORIES[gender]
+# это список строк ("Одежда", "Обувь", ...), а не словарь, у списков нет .items().
+# Это гарантированно роняло весь флоу "Создать пост" сразу после выбора пола
+# (AttributeError: 'list' object has no attribute 'items'). Теперь — обычная
+# итерация по списку + красивые подписи с эмодзи через CATEGORY_POST_LABELS.
+CATEGORY_POST_LABELS = {
+    ("male", "Одежда"): "👔 Мужская одежда",
+    ("male", "Обувь"): "👟 Мужская обувь",
+    ("male", "Аксессуары"): "⌚️ Мужские аксессуары",
+    ("male", "Сумки"): "🎒 Мужские сумки",
+    ("female", "Одежда"): "👗 Женская одежда",
+    ("female", "Обувь"): "👠 Женская обувь",
+    ("female", "Аксессуары"): "💍 Женские аксессуары",
+    ("female", "Сумки"): "👜 Женские сумки",
+}
+
+
 def kb_categories_post(gender: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"post_cat:{gender}:{key}")]
-            for key, label in CATEGORIES[gender].items()]
+    category_keys = CATEGORIES.get(gender, []) if isinstance(CATEGORIES, dict) else CATEGORIES
+    rows = [
+        [InlineKeyboardButton(
+            text=CATEGORY_POST_LABELS.get((gender, key), key),
+            callback_data=f"post_cat:{gender}:{key}",
+        )]
+        for key in category_keys
+    ]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adm:new_post")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
