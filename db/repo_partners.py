@@ -1,7 +1,12 @@
 from db.pool import DB
 
-# Заказы с этими статусами считаются "состоявшейся покупкой" для статистики партнёра
-QUALIFYING_STATUSES = ("confirmed", "warehouse_received", "completed")
+# Заказы с этими статусами считаются "состоявшейся покупкой" для статистики партнёра.
+# ИСПРАВЛЕНИЕ: раньше здесь не было "shipping" — а склад переводит заказ именно
+# в этот статус после "warehouse_received" (см. handlers/staff/warehouse.py,
+# cb_wh_confirm_ship). Из-за этого заказ временно "пропадал" из статистики и
+# Excel-отчёта партнёра сразу после отправки, занижая его комиссию, пока заказ
+# не получит какой-то более поздний статус.
+QUALIFYING_STATUSES = ("confirmed", "warehouse_received", "shipping", "completed")
 
 
 class PartnersRepo:
@@ -72,15 +77,12 @@ class PartnersRepo:
     async def stats(self, partner_login: str, commission_pct: float) -> dict:
         total_referrals = await self.referral_count(partner_login)
         orders = await self.orders_for_partner(partner_login)
-
         buyers = {o["user_tg_id"] for o in orders}
         total_revenue = 0.0
         for o in orders:
             for it in o["items"]:
                 total_revenue += self._parse_price(it.get("price", ""))
-
         commission_earned = round(total_revenue * commission_pct / 100, 2)
-
         return {
             "total_referrals": total_referrals,
             "buyers_count": len(buyers),
