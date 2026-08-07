@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 
 from db.repos import Repos
-from keyboards.client_kb import kb_categories
 from locales.texts import tt
 
 # Объявляем router, чтобы main и __init__.py его видели
@@ -43,33 +42,28 @@ async def cb_category_no_channel(call: CallbackQuery, repos: Repos):
 @router.callback_query(F.data.startswith("cat_switch:"))
 async def cb_switch_catalog(call: CallbackQuery, repos: Repos):
     """Обработчик переключения между мужским/женским каталогом и возврата «в свой»"""
+    # ИСПРАВЛЕНИЕ: раньше здесь пытались точечно редактировать сообщение через
+    # call.message.edit_text(...) — но Telegram не позволяет менять текст у
+    # сообщения с фото (баннером) методом edit_text, для этого нужен отдельный
+    # edit_caption. Ошибка тихо проглатывалась в except, из-за чего при
+    # переключении каталога баннер пропадал и не возвращался. Теперь просто
+    # удаляем старое сообщение и заново отправляем каталог через
+    # show_catalog_entry — ту же функцию, что и при первом входе, она уже
+    # корректно обрабатывает и баннер, и текст без картинки.
+    from handlers.client.start import show_catalog_entry
+
     user = await repos.users.get(call.from_user.id)
     if not user:
         await call.answer("Ошибка: пользователь не найден", show_alert=True)
         return
 
-    lang = user.get("language", "ru")
-    user_gender = user.get("gender", "male")
-
     target = call.data.split(":")[1]
-
-    # Определяем, какой каталог показывать
-    if target == "home":
-        # Возвращаем в родной каталог пользователя
-        show_other = False
-        active_gender = user_gender
-    else:
-        # Переходим в противоположный каталог
-        show_other = True
-        active_gender = target
-
-    urls = await _category_urls(repos, active_gender)
-    keyboard = await kb_categories(repos, lang, user_gender, urls, show_other=show_other)
-    text = await tt(repos, lang, "choose_category")
+    override_gender = None if target == "home" else target
 
     try:
-        await call.message.edit_text(text=text, reply_markup=keyboard)
+        await call.message.delete()
     except Exception:
         pass
 
+    await show_catalog_entry(call.message, user, repos, override_gender=override_gender)
     await call.answer()
