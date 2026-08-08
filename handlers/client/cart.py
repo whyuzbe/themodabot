@@ -824,3 +824,54 @@ async def msg_my_order(message: Message, repos: Repos):
     items = await repos.orders.get_items(order["id"])
     text = await _order_summary_text(repos, order, items, lang)
     await message.answer(text, reply_markup=await kb_my_order(repos, lang, order["id"]))
+
+
+# ── Подтверждение получения заказа и оценка ──────────────────────────
+
+async def kb_order_rate(repos: Repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=await tt(repos, lang, "btn_rating_yes"), callback_data=f"order_rate:yes:{order_id}"),
+        InlineKeyboardButton(text=await tt(repos, lang, "btn_rating_no"), callback_data=f"order_rate:no:{order_id}"),
+    ]])
+
+
+@router.callback_query(F.data.startswith("myorder:received:"))
+async def cb_myorder_received(call: CallbackQuery, repos: Repos):
+    """
+    ИСПРАВЛЕНИЕ: у кнопки "✅ Я получил заказ" (её показывает warehouse.py после
+    подтверждения отправки) вообще не было обработчика — нажатие ничего не
+    делало. Из-за этого заказ никогда не получал статус 'delivered', и
+    active_for_user() считал бы его "активным" вечно, а фича оценки заказа
+    (order_rate_prompt/thanks/sorry — тексты уже были в TEXTS) не запускалась.
+    """
+    order_id = int(call.data.split(":")[2])
+    order = await repos.orders.get(order_id)
+    user = await repos.users.get(call.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    if not order or order["user_tg_id"] != call.from_user.id:
+        await call.answer(await tt(repos, lang, "order_not_found"), show_alert=True)
+        return
+
+    await repos.orders.update_status(order_id, "delivered")
+    await repos.orders.set_client_confirmed(order_id)
+
+    prompt = await tt(repos, lang, "order_rate_prompt", order_id=order_id)
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(prompt, reply_markup=await kb_order_rate(repos, lang, order_id))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("order_rate:"))
+async def cb_order_rate(call: CallbackQuery, repos: Repos):
+    _, verdict, order_id_str = call.data.split(":")
+    order_id = int(order_id_str)
+    user = await repos.users.get(call.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    await repos.orders.set_rating(order_id, 1 if verdict == "yes" else 0)
+
+    key = "order_rate_thanks" if verdict == "yes" else "order_rate_sorry"
+    with suppress(TelegramBadRequest):
+        await call.message.edit_text(await tt(repos, lang, key))
+    await call.answer()
