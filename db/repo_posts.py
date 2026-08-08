@@ -134,6 +134,20 @@ class PostsRepo:
     # ── Лист ожидания "уведомить когда появится" ──────────────────
 
     async def add_interest(self, post_id: int, user_tg_id: int):
+        """
+        ИСПРАВЛЕНИЕ: раньше не было проверки на дубликат — если человек несколько
+        раз нажимал "🔔 Notify me when it's back" на один и тот же товар (например,
+        снова открыв карточку), в stock_interest копились повторные записи. На
+        уведомления это не влияло (interested_users() и так делает DISTINCT), но
+        искажало аналитику склада interest_today_summary(): COUNT(*) считал не
+        уникальных людей, а количество кликов, завышая интерес к товару.
+        """
+        existing = await self.db.fetchval(
+            "SELECT id FROM stock_interest WHERE post_id=$1 AND user_tg_id=$2",
+            post_id, user_tg_id,
+        )
+        if existing:
+            return
         await self.db.execute(
             "INSERT INTO stock_interest (post_id, user_tg_id) VALUES ($1,$2)", post_id, user_tg_id
         )
