@@ -41,8 +41,13 @@ async def show_catalog_entry(message: Message, user: dict | None, repos: Repos, 
     show_other = (override_gender is not None) and (override_gender != user_gender)
     
     urls = await _category_urls(repos, gender)
-    # Передаем именно 'gender' (текущий отображаемый), чтобы иконки менялись корректно
-    kb = await kb_categories(repos, lang, gender, urls, show_other=show_other)
+    # ИСПРАВЛЕНИЕ: kb_categories сама вычисляет, какой пол показывать сейчас,
+    # через (home_gender + show_other) — ей нужно передавать именно домашний
+    # пол пользователя (user_gender), а не уже вычисленный целевой (gender).
+    # Раньше передавали gender — функция переворачивала его ещё раз и
+    # показывала подписи/эмодзи не того пола (например, мужские в женском
+    # каталоге при просмотре "противоположного" каталога).
+    kb = await kb_categories(repos, lang, user_gender, urls, show_other=show_other)
     kb = await with_warehouse_button(kb, repos, gender, lang)
 
     try:
