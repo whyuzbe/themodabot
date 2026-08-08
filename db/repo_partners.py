@@ -1,12 +1,11 @@
 from db.pool import DB
 
 # Заказы с этими статусами считаются "состоявшейся покупкой" для статистики партнёра.
-# ИСПРАВЛЕНИЕ: раньше здесь не было "shipping" — а склад переводит заказ именно
-# в этот статус после "warehouse_received" (см. handlers/staff/warehouse.py,
-# cb_wh_confirm_ship). Из-за этого заказ временно "пропадал" из статистики и
-# Excel-отчёта партнёра сразу после отправки, занижая его комиссию, пока заказ
-# не получит какой-то более поздний статус.
-QUALIFYING_STATUSES = ("confirmed", "warehouse_received", "shipping", "completed")
+# ИСПРАВЛЕНИЕ: добавлены "shipping" и "delivered" — склад переводит заказ в
+# "shipping" при отправке (warehouse.py, cb_wh_confirm_ship), а клиент — в
+# "delivered" при подтверждении получения (cart.py, cb_myorder_received).
+# Без этих статусов заказы временно/навсегда выпадали из подсчёта комиссии.
+QUALIFYING_STATUSES = ("confirmed", "warehouse_received", "shipping", "delivered", "completed")
 
 
 class PartnersRepo:
