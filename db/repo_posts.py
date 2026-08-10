@@ -187,3 +187,24 @@ class PostsRepo:
             row["users"] = [dict(u) for u in users]
             result.append(row)
         return result
+
+    async def deficit_summary(self) -> list[dict]:
+        """
+        Товары, которых сейчас нет в наличии (in_stock=FALSE), но которыми
+        интересовались клиенты за всё время (не только сегодня) — то, что
+        складу стоит закупить в первую очередь. Отсортировано по популярности.
+        Используется кнопкой "🚨 Дефицит" в панели склада.
+        """
+        rows = await self.db.fetch(
+            """SELECT cp.id, cp.title, cp.price, cp.gender, cp.category,
+                      b.name AS brand_name, b.emoji AS brand_emoji,
+                      COUNT(si.id) AS interest_count
+               FROM channel_posts cp
+               LEFT JOIN stock_interest si ON si.post_id = cp.id
+               LEFT JOIN brands b ON b.id = cp.brand_id
+               WHERE cp.in_stock = FALSE
+               GROUP BY cp.id, cp.title, cp.price, cp.gender, cp.category, b.name, b.emoji
+               HAVING COUNT(si.id) > 0
+               ORDER BY interest_count DESC"""
+        )
+        return [dict(r) for r in rows]
