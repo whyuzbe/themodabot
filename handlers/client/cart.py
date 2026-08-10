@@ -9,7 +9,8 @@ from aiogram.exceptions import TelegramBadRequest
 from db.repos import Repos
 from locales.texts import t, tt
 from keyboards.client_kb import (
-    kb_cart, kb_wishlist, kb_after_add, kb_order_confirm, kb_client_verify, kb_my_order, kb_share_phone, kb_remove,
+    kb_cart, kb_wishlist, kb_after_add, kb_order_confirm, kb_client_verify, kb_my_order,
+    kb_share_phone, kb_remove, kb_empty_nav,
 )
 from utils import client_menu_kb
 from translate import tr
@@ -149,7 +150,7 @@ async def msg_cart(message: Message, repos: Repos):
     items = await repos.cart.get(message.from_user.id)
 
     if not items:
-        await message.answer(t(lang, "cart_empty"))
+        await message.answer(t(lang, "cart_empty"), reply_markup=await kb_empty_nav(repos, lang))
         return
 
     cart_title = await tt(repos, lang, "cart_title")
@@ -166,7 +167,7 @@ async def cb_go_cart(call: CallbackQuery, repos: Repos):
 
     if not items:
         with suppress(TelegramBadRequest):
-            await call.message.edit_text(t(lang, "cart_empty"))
+            await call.message.edit_text(t(lang, "cart_empty"), reply_markup=await kb_empty_nav(repos, lang))
         await call.answer()
         return
 
@@ -189,7 +190,7 @@ async def cb_cart_remove(call: CallbackQuery, repos: Repos):
     items = await repos.cart.get(call.from_user.id)
     if not items:
         with suppress(TelegramBadRequest):
-            await call.message.edit_text(t(lang, "cart_empty"))
+            await call.message.edit_text(t(lang, "cart_empty"), reply_markup=await kb_empty_nav(repos, lang))
         await call.answer("🗑")
         return
     cart_title = await tt(repos, lang, "cart_title")
@@ -208,7 +209,7 @@ async def cb_cart_clear(call: CallbackQuery, repos: Repos):
     await repos.cart.clear(call.from_user.id)
     
     with suppress(TelegramBadRequest):
-        await call.message.edit_text(t(lang, "cart_empty"))
+        await call.message.edit_text(t(lang, "cart_empty"), reply_markup=await kb_empty_nav(repos, lang))
     await call.answer()
 
 
@@ -721,7 +722,7 @@ async def msg_wishlist(message: Message, repos: Repos):
     items = await repos.cart.wish_get(message.from_user.id)
 
     if not items:
-        await message.answer(t(lang, "wishlist_empty"))
+        await message.answer(t(lang, "wishlist_empty"), reply_markup=await kb_empty_nav(repos, lang))
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
     await message.answer(wishlist_title + "\n" + _cart_lines(items), reply_markup=await kb_wishlist(repos, lang, items))
@@ -735,7 +736,7 @@ async def cb_go_wishlist(call: CallbackQuery, repos: Repos):
 
     if not items:
         with suppress(TelegramBadRequest):
-            await call.message.edit_text(t(lang, "wishlist_empty"))
+            await call.message.edit_text(t(lang, "wishlist_empty"), reply_markup=await kb_empty_nav(repos, lang))
         await call.answer()
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
@@ -779,7 +780,7 @@ async def cb_wish_remove(call: CallbackQuery, repos: Repos):
     items = await repos.cart.wish_get(call.from_user.id)
     if not items:
         with suppress(TelegramBadRequest):
-            await call.message.edit_text(t(lang, "wishlist_empty"))
+            await call.message.edit_text(t(lang, "wishlist_empty"), reply_markup=await kb_empty_nav(repos, lang))
         await call.answer("🗑")
         return
     wishlist_title = await tt(repos, lang, "wishlist_title")
