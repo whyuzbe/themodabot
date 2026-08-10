@@ -16,7 +16,7 @@ handlers/staff/warehouse.py
 
 from aiogram import Router, F, Bot
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto,
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, BufferedInputFile,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -68,6 +68,7 @@ def kb_warehouse_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📦 Активные заказы", callback_data="wh:orders")],
         [InlineKeyboardButton(text="📸 Новый фотоотчёт", callback_data="wh:new_report")],
         [InlineKeyboardButton(text="📋 Управление наличием", callback_data="wh:stock")],
+        [InlineKeyboardButton(text="🚨 Дефицит", callback_data="wh:deficit")],
         [InlineKeyboardButton(text="📊 Интерес за сегодня", callback_data="wh:interest")],
         [InlineKeyboardButton(text="🚪 Выйти", callback_data="wh:logout")],
     ])
@@ -734,6 +735,86 @@ async def cb_wh_toggle_stock(call: CallbackQuery, repos: Repos, bot: Bot):
         f"📋 <b>{brand['emoji']} {brand['name']}</b>\n\n"
         "Нажмите на товар, чтобы переключить статус:\n✅ в наличии / ❌ закончился",
         reply_markup=kb_stock_posts(posts, brand),
+    )
+
+
+# ── Дефицитные товары (нет в наличии, но есть интерес) ────────────────
+
+@router.callback_query(F.data == "wh:deficit")
+async def cb_wh_deficit(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "warehouse"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    items = await repos.posts.deficit_summary()
+    if not items:
+        await safe_edit(
+            call.message,
+            "✅ Дефицита нет — все товары, которыми интересовались клиенты, в наличии.",
+            reply_markup=kb_back_wh(),
+        )
+        await call.answer()
+        return
+
+    lines = ["🚨 <b>Дефицитные товары</b>\n<i>Нет в наличии, но есть интерес клиентов:</i>"]
+    for it in items:
+        brand_part = f"{it['brand_emoji']} {it['brand_name']} — " if it.get("brand_name") else ""
+        lines.append(f"\n👆 <b>{it['interest_count']}</b> · {brand_part}{it['title']} ({it['price']})")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n…"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Excel", callback_data="wh:deficit_export")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="wh:menu")],
+    ])
+    await safe_edit(call.message, text, reply_markup=kb)
+    await call.answer()
+
+
+@router.callback_query(F.data == "wh:deficit_export")
+async def cb_wh_deficit_export(call: CallbackQuery, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "warehouse"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    await call.answer("⏳ Генерирую файл...")
+
+    items = await repos.posts.deficit_summary()
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from datetime import datetime as _dt
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Дефицит"
+
+    headers = ["Раздел", "Товар", "Цена", "Пол", "Интерес (кликов)"]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=1, column=col, value=h)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="C0392B")
+
+    for i, it in enumerate(items, 2):
+        brand_part = f"{it['brand_emoji']} {it['brand_name']}" if it.get("brand_name") else "—"
+        ws.cell(row=i, column=1, value=brand_part)
+        ws.cell(row=i, column=2, value=it["title"])
+        ws.cell(row=i, column=3, value=it["price"])
+        ws.cell(row=i, column=4, value="Мужской" if it["gender"] == "male" else "Женский")
+        ws.cell(row=i, column=5, value=it["interest_count"])
+
+    for col in ws.columns:
+        ws.column_dimensions[col[0].column_letter].width = 24
+
+    from io import BytesIO
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"deficit_{_dt.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    await call.message.answer_document(
+        BufferedInputFile(buf.read(), filename=filename), caption="📥 Список дефицита готов!"
     )
 
 
