@@ -58,6 +58,7 @@ class ManagerStates(StatesGroup):
     brand_category = State()
     brand_name = State()
     brand_emoji = State()
+    brand_topic_id = State()
     report_channel_id = State()
     report_channel_url = State()
 
@@ -692,17 +693,17 @@ async def msg_brand_name(message: Message, state: FSMContext, repos: Repos):
 
 
 @router.message(ManagerStates.brand_emoji)
-async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos, bot: Bot):
+async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos):
     if not await require_role(message.from_user.id, repos, "manager"):
         await state.clear()
         return
 
     emoji = message.text.strip()
+    await state.update_data(brand_emoji=emoji)
+
     data = await state.get_data()
     gender = data["brand_gender"]
     category = data["brand_category"]
-    name = data["brand_name"]
-    await state.clear()
 
     channel = await repos.brands.get_channel(gender, category)
     if not channel:
@@ -712,12 +713,40 @@ async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos, bot
             "Зайди в «📡 Каналы» и укажи chat_id + ссылку для этой категории, потом повтори создание раздела.",
             reply_markup=kb_manager(),
         )
+        await state.clear()
         return
 
+    # ИСПРАВЛЕНИЕ: раньше бот ВСЕГДА создавал новый топик в группе автоматически.
+    # Если топики уже были созданы вручную заранее, приходилось либо плодить
+    # дубли, либо лезть в базу руками. Теперь можно выбрать — создать новый
+    # или привязать уже существующий по его topic_id.
+    await message.answer(
+        "Как поступить с топиком в группе?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🆕 Создать новый топик", callback_data="brand_topic:new")],
+            [InlineKeyboardButton(text="🔗 Привязать существующий", callback_data="brand_topic:existing")],
+        ]),
+    )
+
+
+@router.callback_query(F.data == "brand_topic:new")
+async def cb_brand_topic_new(call: CallbackQuery, state: FSMContext, repos: Repos, bot: Bot):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    data = await state.get_data()
+    gender = data["brand_gender"]
+    category = data["brand_category"]
+    name = data["brand_name"]
+    emoji = data["brand_emoji"]
+    await state.clear()
+
+    channel = await repos.brands.get_channel(gender, category)
     try:
         topic = await bot.create_forum_topic(chat_id=channel["chat_id"], name=f"{emoji} {name}")
     except Exception as e:
-        await message.answer(
+        await call.message.answer(
             f"❌ Не удалось создать топик в группе: <code>{e}</code>\n\n"
             "Проверь:\n"
             "• Бот добавлен админом в эту группу\n"
@@ -726,16 +755,69 @@ async def msg_brand_emoji(message: Message, state: FSMContext, repos: Repos, bot
             "• chat_id в «📡 Каналы» указан верно",
             reply_markup=kb_manager(),
         )
+        await call.answer()
         return
 
-    brand_id = await repos.brands.create(
+    await repos.brands.create(
         name=name, emoji=emoji, gender=gender, category=category,
         topic_id=topic.message_thread_id,
     )
     cat_label = CATEGORY_LABELS_FLAT.get((gender, category), category)
-    await message.answer(
+    await call.message.answer(
         f"✅ <b>Раздел создан, топик в группе создан автоматически!</b>\n\n"
         f"{emoji} <b>{name}</b>\n📂 {cat_label}\n🆔 topic_id: {topic.message_thread_id}",
+        reply_markup=kb_manager(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "brand_topic:existing")
+async def cb_brand_topic_existing(call: CallbackQuery, state: FSMContext, repos: Repos):
+    if not await require_role(call.from_user.id, repos, "manager"):
+        await call.answer("❌ Сессия истекла", show_alert=True)
+        return
+
+    await state.set_state(ManagerStates.brand_topic_id)
+    await call.message.answer(
+        "🔗 Пришли ID уже существующего топика (просто число).\n\n"
+        "💡 Как узнать ID: открой нужный топик в группе → нажми на его название "
+        "вверху экрана → «Copy Link» — в ссылке вида "
+        "<code>https://t.me/c/XXXXXXXXXX/123</code> последнее число после "
+        "последнего слэша (в примере — 123) и есть ID топика.",
+    )
+    await call.answer()
+
+
+@router.message(ManagerStates.brand_topic_id)
+async def msg_brand_topic_id(message: Message, state: FSMContext, repos: Repos):
+    if not await require_role(message.from_user.id, repos, "manager"):
+        await state.clear()
+        return
+
+    raw = message.text.strip()
+    if not raw.isdigit():
+        await message.answer("⚠️ Это должно быть просто число (ID топика). Попробуй ещё раз:")
+        return
+
+    topic_id = int(raw)
+    data = await state.get_data()
+    gender = data["brand_gender"]
+    category = data["brand_category"]
+    name = data["brand_name"]
+    emoji = data["brand_emoji"]
+    await state.clear()
+
+    await repos.brands.create(
+        name=name, emoji=emoji, gender=gender, category=category,
+        topic_id=topic_id,
+    )
+    cat_label = CATEGORY_LABELS_FLAT.get((gender, category), category)
+    await message.answer(
+        f"✅ <b>Раздел привязан к существующему топику!</b>\n\n"
+        f"{emoji} <b>{name}</b>\n📂 {cat_label}\n🆔 topic_id: {topic_id}\n\n"
+        "💡 Убедись, что это правильный ID — если ошибёшься, посты будут "
+        "публиковаться не в тот топик. Проверить можно сразу — опубликуй "
+        "тестовый пост через «📝 Создать пост» у админа.",
         reply_markup=kb_manager(),
     )
 
