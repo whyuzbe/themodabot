@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -46,6 +47,41 @@ async def cart_expiration_checker(bot: Bot, repos: Repos):
             break
         except Exception as e:
             logger.error(f"Ошибка в фоновой проверке корзины: {e}")
+
+
+async def deficit_reminder_checker(bot: Bot, repos: Repos):
+    """
+    Раз в день (около 20:00 по времени сервера) напоминает всем сотрудникам
+    склада проверить дефицитные товары, если такие есть — по аналогии с идеей
+    из cart_expiration_checker, но раз в сутки, а не каждую минуту.
+    Отправляет всем складским аккаунтам с привязанным tg_id (не только тем,
+    у кого сейчас активна сессия), чтобы напоминание точно дошло, даже если
+    сотрудник в этот момент не залогинен в панель.
+    """
+    reminded_date = None
+    while True:
+        try:
+            await asyncio.sleep(600)  # проверяем раз в 10 минут, шлём — раз в день
+            now = datetime.datetime.now()
+            if now.hour == 20 and reminded_date != now.date():
+                items = await repos.posts.deficit_summary()
+                if items:
+                    warehouse_staff = await repos.staff.list_by_role("warehouse")
+                    text = (
+                        f"🚨 <b>Напоминание: {len(items)} дефицитных позиций</b>\n\n"
+                        "Загляните в «🚨 Дефицит» в панели склада и закажите то, чего не хватает."
+                    )
+                    for wh in warehouse_staff:
+                        if wh.get("tg_id"):
+                            try:
+                                await bot.send_message(wh["tg_id"], text)
+                            except Exception:
+                                pass
+                reminded_date = now.date()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Ошибка в напоминании о дефиците: {e}")
 
 
 async def main():
@@ -96,12 +132,15 @@ async def main():
 
     # Запускаем фоновую очистку просроченных броней
     checker_task = asyncio.create_task(cart_expiration_checker(bot, repos))
+    # Запускаем фоновое ежедневное напоминание складу о дефиците
+    deficit_task = asyncio.create_task(deficit_reminder_checker(bot, repos))
 
     try:
         logger.info("🚀 Бот успешно запущен!")
         await dp.start_polling(bot, skip_updates=True)
     finally:
         checker_task.cancel()
+        deficit_task.cancel()
         await db.close()
         if redis:
             await redis.aclose()
