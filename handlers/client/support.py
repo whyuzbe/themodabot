@@ -190,7 +190,14 @@ async def cb_client_close_ticket(call: CallbackQuery, state: FSMContext, repos: 
     await state.clear()
 
     if ticket:
-        await repos.tickets.update(ticket["id"], status="closed")
+        # ИСПРАВЛЕНИЕ: closed_at в Postgres — колонка TIMESTAMPTZ, asyncpg не
+        # принимает строку вместо настоящего datetime (падало с DataError).
+        # Раньше здесь ещё и не проставлялся closed_at вовсе — теперь и то,
+        # и другое исправлено разом.
+        await repos.tickets.update(
+            ticket["id"], status="closed",
+            closed_at=datetime.now(),
+        )
 
     await call.message.edit_text(await tr(repos, "✅ Обращение закрыто. Спасибо!", lang))
     await call.answer()
@@ -340,7 +347,7 @@ async def cb_ticket_take(call: CallbackQuery, state: FSMContext, repos: Repos, b
 
     await repos.tickets.update(
         ticket_id, status="in_progress", admin_login=admin_login,
-        admin_tg_id=call.from_user.id, taken_at=datetime.now().isoformat(sep=" ", timespec="seconds"),
+        admin_tg_id=call.from_user.id, taken_at=datetime.now(),
     )
 
     messages = await repos.tickets.get_messages(ticket_id)
@@ -400,7 +407,7 @@ async def cb_ticket_close(call: CallbackQuery, state: FSMContext, repos: Repos, 
         await call.answer("❌ Тикет не найден", show_alert=True)
         return
 
-    await repos.tickets.update(ticket_id, status="closed", closed_at=datetime.now().isoformat(sep=" ", timespec="seconds"))
+    await repos.tickets.update(ticket_id, status="closed", closed_at=datetime.now())
     await state.clear()
 
     user = await repos.users.get(ticket["user_tg_id"])
