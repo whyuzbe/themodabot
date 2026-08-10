@@ -43,6 +43,11 @@ class OrdersRepo:
         return [dict(r) for r in rows]
 
     async def update_status(self, order_id: int, status: str):
+        # ИСПРАВЛЕНИЕ: раньше сюда передавалась строка (.isoformat(...)), а
+        # confirmed_at/completed_at в Postgres — колонки TIMESTAMPTZ. asyncpg
+        # строго типизирован и не принимает строку вместо настоящего datetime —
+        # падал с DataError на каждое подтверждение/доставку заказа. Теперь
+        # передаём сам объект datetime.now().
         extra_sql, extra_val = "", None
         if status == "confirmed":
             extra_sql, extra_val = ", confirmed_at=$2", datetime.now()
@@ -58,6 +63,8 @@ class OrdersRepo:
             await self.db.execute("UPDATE orders SET status=$1 WHERE id=$2", status, order_id)
 
     async def set_client_confirmed(self, order_id: int):
+        # ИСПРАВЛЕНИЕ: та же проблема — client_confirmed_at тоже TIMESTAMPTZ,
+        # нужен объект datetime, а не строка.
         await self.db.execute(
             "UPDATE orders SET client_confirmed_at=$1 WHERE id=$2",
             datetime.now(), order_id,
