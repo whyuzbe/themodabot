@@ -45,9 +45,9 @@ class OrdersRepo:
     async def update_status(self, order_id: int, status: str):
         extra_sql, extra_val = "", None
         if status == "confirmed":
-            extra_sql, extra_val = ", confirmed_at=$2", datetime.now().isoformat(sep=" ", timespec="seconds")
+            extra_sql, extra_val = ", confirmed_at=$2", datetime.now()
         elif status in ("completed", "delivered"):
-            extra_sql, extra_val = ", completed_at=$2", datetime.now().isoformat(sep=" ", timespec="seconds")
+            extra_sql, extra_val = ", completed_at=$2", datetime.now()
 
         if extra_val:
             await self.db.execute(
@@ -60,7 +60,7 @@ class OrdersRepo:
     async def set_client_confirmed(self, order_id: int):
         await self.db.execute(
             "UPDATE orders SET client_confirmed_at=$1 WHERE id=$2",
-            datetime.now().isoformat(sep=" ", timespec="seconds"), order_id,
+            datetime.now(), order_id,
         )
 
     async def by_user(self, user_tg_id: int) -> list[dict]:
