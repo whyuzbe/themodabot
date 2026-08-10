@@ -154,7 +154,19 @@ async def kb_after_add(repos, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=await tt(repos, lang, "btn_cart"), callback_data="go:cart"),
          InlineKeyboardButton(text=await tt(repos, lang, "btn_wishlist"), callback_data="go:wishlist")],
-        [InlineKeyboardButton(text=await tt(repos, lang, "main_menu"), callback_data="go:main")],
+        [InlineKeyboardButton(text=await tt(repos, lang, "btn_main_menu"), callback_data="go:main")],
+    ])
+
+
+async def kb_empty_nav(repos, lang: str) -> InlineKeyboardMarkup:
+    """
+    ИСПРАВЛЕНИЕ: раньше пустая корзина/сохранённые отправлялись голым текстом
+    без единой кнопки — если у пользователя не было видно reply-клавиатуры
+    главного меню (например, свернул её), единственным способом продолжить
+    было вручную набрать /start. Теперь всегда есть кнопка возврата.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=await tt(repos, lang, "btn_main_menu"), callback_data="go:main")],
     ])
 
 
