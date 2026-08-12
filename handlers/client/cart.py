@@ -247,7 +247,16 @@ async def cb_checkout(call: CallbackQuery, state: FSMContext, repos: Repos):
         await call.answer()
         return
 
-    await state.update_data(lang=lang, cart_items=available)
+    await state.update_data(
+        lang=lang,
+        # ИСПРАВЛЕНИЕ: added_at приходит из БД настоящим объектом datetime
+        # (не строкой) — RedisStorage сериализует состояние в JSON, а json
+        # не умеет сериализовать datetime напрямую, из-за чего checkout падал
+        # с TypeError сразу после перехода на RedisStorage. Это поле тут и не
+        # нужно — дальше по чекауту используются только post_id/title/price/
+        # photo_file_id/brand_id/category, поэтому просто не сохраняем его.
+        cart_items=[{k: v for k, v in it.items() if k != "added_at"} for it in available],
+    )
 
     if not user or not user.get("phone"):
         await state.set_state(CartStates.waiting_phone)
