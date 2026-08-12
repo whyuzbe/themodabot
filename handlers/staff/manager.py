@@ -735,12 +735,25 @@ async def cb_brand_topic_new(call: CallbackQuery, state: FSMContext, repos: Repo
         await call.answer("❌ Сессия истекла", show_alert=True)
         return
 
+    # ИСПРАВЛЕНИЕ: раньше данные брались напрямую через data["ключ"] — если
+    # FSM-данные пропали (например, бот перезапустился между вводом эмодзи и
+    # нажатием кнопки — Dispatcher() по умолчанию хранит состояния только в
+    # памяти процесса, и любой рестарт их стирает), это падало с KeyError.
+    # Теперь — вежливая просьба начать заново вместо краша.
     data = await state.get_data()
-    gender = data["brand_gender"]
-    category = data["brand_category"]
-    name = data["brand_name"]
-    emoji = data["brand_emoji"]
+    gender = data.get("brand_gender")
+    category = data.get("brand_category")
+    name = data.get("brand_name")
+    emoji = data.get("brand_emoji")
     await state.clear()
+
+    if not all([gender, category, name, emoji]):
+        await call.answer(
+            "⚠️ Данные о разделе не сохранились (например, из-за перезапуска бота). "
+            "Начните заново: «📂 Разделы» → «➕ Добавить раздел».",
+            show_alert=True,
+        )
+        return
 
     channel = await repos.brands.get_channel(gender, category)
     try:
@@ -801,11 +814,19 @@ async def msg_brand_topic_id(message: Message, state: FSMContext, repos: Repos):
 
     topic_id = int(raw)
     data = await state.get_data()
-    gender = data["brand_gender"]
-    category = data["brand_category"]
-    name = data["brand_name"]
-    emoji = data["brand_emoji"]
+    gender = data.get("brand_gender")
+    category = data.get("brand_category")
+    name = data.get("brand_name")
+    emoji = data.get("brand_emoji")
     await state.clear()
+
+    if not all([gender, category, name, emoji]):
+        await message.answer(
+            "⚠️ Данные о разделе не сохранились (например, из-за перезапуска бота). "
+            "Начните заново: «📂 Разделы» → «➕ Добавить раздел».",
+            reply_markup=kb_manager(),
+        )
+        return
 
     await repos.brands.create(
         name=name, emoji=emoji, gender=gender, category=category,
