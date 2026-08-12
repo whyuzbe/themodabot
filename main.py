@@ -4,6 +4,8 @@ import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.fsm.storage.memory import MemoryStorage
 from redis.asyncio import Redis
 
 # Конфигурация
@@ -96,12 +98,6 @@ async def main():
     else:
         logger.info("🔍 DEBUG BOT_TOKEN: пусто/None")
 
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    dp = Dispatcher()
-
     # Подключение к базе данных и Redis
     db = DB(driver=DB_DRIVER, dsn_or_path=DATABASE_URL)
     await db.connect()
@@ -115,6 +111,27 @@ async def main():
     await db.init_schema()
 
     redis = Redis.from_url(REDIS_URL) if REDIS_URL else None
+
+    # ИСПРАВЛЕНИЕ: Dispatcher() без явного storage хранит все FSM-диалоги
+    # (создание раздела в /manager, оформление заказа, ответ админа в тикете
+    # и т.д.) только в оперативной памяти процесса — любой рестарт/редеплой
+    # бота стирал прогресс ВСЕХ пользователей сразу, что приводило к
+    # KeyError-ам вида "данные не найдены" на любом многошаговом диалоге,
+    # прерванном рестартом. Раз Redis уже используется в проекте — подключаем
+    # RedisStorage, и диалоги теперь переживают рестарты.
+    storage = RedisStorage(redis) if redis else MemoryStorage()
+    if not redis:
+        logger.warning(
+            "⚠️ REDIS_URL не задан — FSM-диалоги хранятся в памяти и "
+            "будут стираться при каждом рестарте бота."
+        )
+
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    dp = Dispatcher(storage=storage)
+
     repos = Repos(db, redis=redis)
 
     # ИСПРАВЛЕНИЕ: создаём стартовый аккаунт manager/<пароль из .env>,
