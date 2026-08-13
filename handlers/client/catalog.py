@@ -54,7 +54,21 @@ async def cb_switch_catalog(call: CallbackQuery, repos: Repos):
 
     user = await repos.users.get(call.from_user.id)
     if not user:
-        await call.answer("Ошибка: пользователь не найден", show_alert=True)
+        # ИСПРАВЛЕНИЕ: раньше это был тупиковый алерт "Ошибка: пользователь
+        # не найден" — человек не понимал, что делать дальше, и застревал.
+        # Такое бывает, если профиль был удалён (/dell_num) или регистрация
+        # не завершена, а человек нажимает кнопку из старого сообщения.
+        # Теперь бот явно говорит, что делать, и убирает зависшее сообщение
+        # с нерабочими кнопками, чтобы на него больше не жали повторно.
+        await call.answer(
+            "⚠️ Профиль не найден. Отправьте /start, чтобы начать заново.\n"
+            "⚠️ Profile not found. Send /start to begin again.",
+            show_alert=True,
+        )
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
         return
 
     target = call.data.split(":")[1]
