@@ -836,6 +836,36 @@ async def msg_my_order(message: Message, repos: Repos):
     await message.answer(text, reply_markup=await kb_my_order(repos, lang, order["id"]))
 
 
+@router.message(ButtonText("btn_order_history"))
+async def msg_order_history(message: Message, repos: Repos):
+    """
+    ИСПРАВЛЕНИЕ: кнопка "📜 История заказов" в главном меню (kb_main_menu)
+    не имела обработчика — как и "🛍 Каталог" раньше, нажатие ничего не делало.
+    """
+    from db.repo_orders import status_label
+
+    user = await repos.users.get(message.from_user.id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    orders = await repos.orders.history_for_user(message.from_user.id)
+    if not orders:
+        await message.answer(await tt(repos, lang, "order_history_empty"))
+        return
+
+    lines = [await tt(repos, lang, "order_history_title")]
+    for o in orders[:20]:
+        items = await repos.orders.get_items(o["id"])
+        items_str = ", ".join(it.get("title", "?") for it in items)
+        status_text = await tr(repos, status_label(o["status"]), lang)
+        date_str = str(o.get("created_at", ""))[:10]
+        lines.append(f"\n📦 #{o['id']} — {date_str}\n{status_text}\n{items_str}")
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n…"
+    await message.answer(text)
+
+
 # ── Подтверждение получения заказа и оценка ──────────────────────────
 
 async def kb_order_rate(repos: Repos, lang: str, order_id: int) -> InlineKeyboardMarkup:
